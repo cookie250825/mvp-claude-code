@@ -1,0 +1,16 @@
+target/
+**/.idea/
+*.iml
+*.log
+config.yaml
+.agent/
+*.class
+*.jar
+!src/**
+
+# IDE (any depth)
+**/.idea/
+*.iml
+
+# Build artifacts
+dependency-reduced-pom.xml

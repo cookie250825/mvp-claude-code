@@ -1,0 +1,22 @@
+model:
+  provider: deepseek
+  name: deepseek-chat
+  baseUrl: https://api.deepseek.com/v1
+  apiKey: ${DEEPSEEK_API_KEY}
+  temperature: 0.7
+  maxTokens: 4096
+
+tools:
+  builtin: [file, bash, search]
+  mcp:
+    enabled: false
+    servers:
+      - name: filesystem
+        command: npx
+        args: ["-y", "@modelcontextprotocol/server-filesystem", "."]
+
+context:
+  compactThreshold: 50000
+
+memory:
+  dir: ~/.agent/memory
