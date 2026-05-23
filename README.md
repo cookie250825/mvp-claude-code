@@ -163,6 +163,9 @@ context:
 
 memory:
   dir: ~/.agent/memory                 # 记忆文件存储目录
+
+security:
+  workspace: ""                        # 留空=当前目录；填绝对路径=限制文件操作范围
 ```
 
 ## 快速开始
