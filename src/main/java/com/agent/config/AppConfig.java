@@ -105,6 +105,12 @@ public class AppConfig {
     public String getProjectName() { return "mini-claude"; }
     public String getWorkspace()   { return System.getProperty("user.dir"); }
 
+    // ---- Security ----
+    public String getSecurityWorkspace() { 
+        String path = str("security", "workspace", "");
+        return path.isEmpty() ? System.getProperty("user.dir") : path;
+    }
+
     // ---- Helpers ----
     @SuppressWarnings("unchecked")
     private String str(String section, String key, String def) {

@@ -9,14 +9,17 @@ import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.nio.file.*;
-import java.util.Arrays;
 import java.util.List;
 
 public class FileTool extends BaseTool {
     private static final Logger log = LoggerFactory.getLogger(FileTool.class);
     private static final ObjectMapper mapper = new ObjectMapper();
     private static final int MAX_OUTPUT_CHARS = 50000;
-    private static final Path WORKSPACE = Path.of(System.getProperty("user.dir")).toAbsolutePath().normalize();
+    private static Path WORKSPACE;
+
+    public static void initWorkspace(String workspacePath) {
+        WORKSPACE = Path.of(workspacePath).toAbsolutePath().normalize();
+    }
 
     @Override public String name() { return "file"; }
     @Override public String description() { return "读写文件。操作范围限制在工作目录内。"; }

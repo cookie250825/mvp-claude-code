@@ -21,3 +21,6 @@ context:
 memory:
   dir: ~/.agent/memory
   maxFiles: 200
+
+security:
+  workspace: ""

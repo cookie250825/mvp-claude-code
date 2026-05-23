@@ -20,3 +20,6 @@ context:
 
 memory:
   dir: ~/.agent/memory
+
+security:
+  workspace: ""  # 留空=当前工作目录；填写绝对路径=限制文件操作范围

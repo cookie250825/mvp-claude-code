@@ -38,10 +38,13 @@ public class Main implements Callable<Integer> {
         // 1. 加载配置
         AppConfig config = new AppConfig(configPath);
 
-        // 2. 初始化记忆系统
+        // 2. 初始化安全工作目录
+        FileTool.initWorkspace(config.getSecurityWorkspace());
+
+        // 3. 初始化记忆系统
         MemoryManager memory = new MemoryManager(config.getMemoryDir());
 
-        // 3. 初始化工具注册表
+        // 4. 初始化工具注册表
         ToolRegistry registry = new ToolRegistry();
         ToolDispatcher dispatcher = new ToolDispatcher();
 
@@ -52,7 +55,7 @@ public class Main implements Callable<Integer> {
             dispatcher.register(tool);
         }
 
-        // 4. 连接 MCP servers
+        // 5. 连接 MCP servers
         for (AppConfig.McpServerConfig server : config.getMcpServers()) {
             try {
                 MCPClient mcpClient = new MCPClient();
@@ -71,10 +74,10 @@ public class Main implements Callable<Integer> {
             }
         }
 
-        // 5. 初始化 AI 服务
+        // 6. 初始化 AI 服务
         AIService ai = new AIService(config);
 
-        // 5.5. 注册 TaskTool + TodoWrite（依赖 AIService / TodoManager）
+        // 6.5. 注册 TaskTool + TodoWrite（依赖 AIService / TodoManager）
         TodoManager todoManager = new TodoManager();
         TodoWriteTool todoWrite = new TodoWriteTool(todoManager);
         registry.register(todoWrite);
@@ -84,13 +87,13 @@ public class Main implements Callable<Integer> {
         registry.register(taskTool);
         dispatcher.register(taskTool);
 
-        // 6. 初始化核心组件
+        // 7. 初始化核心组件
         CompactService compact = new CompactService(ai, config.getCompactThreshold());
         ContextBuilder ctxBuilder = new ContextBuilder(registry, memory, config);
         AgentLoop loop = new AgentLoop(ai, dispatcher, compact, ctxBuilder, todoManager);
         loop.init();
 
-        // 7. 运行
+        // 8. 运行
         if (prompt != null) {
             System.out.println(loop.process(prompt));
         } else {

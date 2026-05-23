@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.1.1 — 可配置沙箱 (2026-05-23)
+
+### 新增
+- **可配置工作目录** — `config.yaml` 新增 `security.workspace` 配置项，`FileTool.initWorkspace()` 动态设置沙箱边界
+
 ## v1.1.0 — 沙箱安全 (2026-05-23)
 
 ### 新增
