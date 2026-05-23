@@ -16,7 +16,7 @@ import java.util.Scanner;
 import java.util.concurrent.Callable;
 
 @Command(name = "agent", mixinStandardHelpOptions = true, version = "1.0",
-         description = "Mini Claude Code - Java AI Agent")
+         description = "MVP Claude Code - Java AI Agent")
 public class Main implements Callable<Integer> {
 
     @Option(names = {"-i", "--interactive"}, description = "交互模式")

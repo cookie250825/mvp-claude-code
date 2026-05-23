@@ -9,15 +9,26 @@ import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.nio.file.*;
+import java.util.Arrays;
 import java.util.List;
 
 public class FileTool extends BaseTool {
     private static final Logger log = LoggerFactory.getLogger(FileTool.class);
     private static final ObjectMapper mapper = new ObjectMapper();
     private static final int MAX_OUTPUT_CHARS = 50000;
+    private static final Path WORKSPACE = Path.of(System.getProperty("user.dir")).toAbsolutePath().normalize();
 
     @Override public String name() { return "file"; }
-    @Override public String description() { return "读写文件。支持读、写、列出目录、检查文件是否存在。"; }
+    @Override public String description() { return "读写文件。操作范围限制在工作目录内。"; }
+
+    /** 安全检查：限制路径在工作目录内 */
+    private Path safePath(String raw) {
+        Path resolved = WORKSPACE.resolve(resolvePath(raw)).toAbsolutePath().normalize();
+        if (!resolved.startsWith(WORKSPACE)) {
+            throw new SecurityException("路径越界: " + raw + " (工作目录: " + WORKSPACE + ")");
+        }
+        return resolved;
+    }
 
     @Override
     public ToolResult execute(String arguments) {
@@ -28,28 +39,30 @@ public class FileTool extends BaseTool {
             if (path.isEmpty()) return ToolResult.error("path is required");
 
             if ("read".equals(action)) {
-                if (!Files.exists(Path.of(path))) return ToolResult.error("File not found: " + path);
-                String content = Files.readString(Path.of(path));
+                if (!Files.exists(safePath(path))) return ToolResult.error("File not found: " + path);
+                String content = Files.readString(safePath(path));
                 return ToolResult.success(truncate(content));
             } else if ("write".equals(action)) {
                 String content = args.path("content").asText();
-                Path p = Path.of(path);
+                Path p = safePath(path);
                 if (p.getParent() != null) Files.createDirectories(p.getParent());
                 Files.writeString(p, content, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
                 return ToolResult.success("Written: " + p);
             } else if ("list".equals(action)) {
                 StringBuilder sb = new StringBuilder();
-                try (var s = Files.list(Path.of(path))) {
+                try (var s = Files.list(safePath(path))) {
                     s.forEach(f -> sb.append(f.getFileName()).append("\n"));
                 }
                 return ToolResult.success(truncate(sb.toString()));
             } else if ("exists".equals(action)) {
-                return ToolResult.success(String.valueOf(Files.exists(Path.of(path))));
+                return ToolResult.success(String.valueOf(Files.exists(safePath(path))));
             } else {
                 return ToolResult.error("Unknown action: " + action + ". Use read/write/list/exists");
             }
         } catch (IOException e) {
             return ToolResult.error("IO error: " + e.getMessage());
+        } catch (SecurityException e) {
+            return ToolResult.error("安全限制: " + e.getMessage());
         }
     }
 
