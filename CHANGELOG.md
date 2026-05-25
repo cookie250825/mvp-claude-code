@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.1.2 — 修正记忆类型 (2026-05-25)
+
+### 修复
+- **MemoryManager 移除 TASK 类型** — 对齐 Claude Code 四种分类（user/feedback/project/reference），TASK 属于 .tasks/ 任务系统
+
 ## v1.1.1 — 可配置沙箱 (2026-05-23)
 
 ### 新增
