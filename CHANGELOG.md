@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.2.0 — 后台异步任务 (2026-05-25)
+
+### 新增
+- **BackgroundManager** — 线程池执行长时间命令，通知队列异步返回结果
+- **background_run** 工具 — 启动后台任务，立即返回 ID，不阻塞 Agent 循环
+- **check_background** 工具 — 查询后台任务状态（单个/全部）
+- AgentLoop 每轮 `drain()` 通知队列，自动注入 `<background-results>` 到上下文
+
 ## v1.1.2 — 修正记忆类型 (2026-05-25)
 
 ### 修复

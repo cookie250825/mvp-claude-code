@@ -17,15 +17,18 @@ public class AgentLoop {
     private final CompactService compact;
     private final ContextBuilder ctx;
     private final com.agent.tools.TodoManager todoManager;
+    private final BackgroundManager bgManager;
     private List<ChatMessage> history = new ArrayList<>();
 
     public AgentLoop(AIService ai, ToolDispatcher tools, CompactService compact,
-                     ContextBuilder ctx, com.agent.tools.TodoManager todoManager) {
+                     ContextBuilder ctx, com.agent.tools.TodoManager todoManager,
+                     BackgroundManager bgManager) {
         this.ai = ai;
         this.tools = tools;
         this.compact = compact;
         this.ctx = ctx;
         this.todoManager = todoManager;
+        this.bgManager = bgManager;
     }
 
     public void init() {
@@ -37,6 +40,20 @@ public class AgentLoop {
         int roundsWithoutTodo = 0;
 
         for (int round = 1; round <= MAX_ROUNDS; round++) {
+            // S08: 排空后台任务完成通知，注入上下文
+            if (bgManager != null) {
+                java.util.List<java.util.Map<String, Object>> notifs = bgManager.drain();
+                if (!notifs.isEmpty()) {
+                    StringBuilder txt = new StringBuilder("<background-results>\n");
+                    for (var n : notifs) {
+                        txt.append("[").append(n.get("task_id")).append("] ")
+                           .append(n.get("status")).append(": ").append(n.get("result")).append("\n");
+                    }
+                    txt.append("</background-results>");
+                    history.add(UserMessage.from(txt.toString()));
+                }
+            }
+
             // F3: micro-compact — 静默裁剪旧工具输出，零 API 成本
             history = compact.microCompact(history);
 

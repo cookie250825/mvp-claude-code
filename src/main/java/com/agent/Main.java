@@ -77,7 +77,13 @@ public class Main implements Callable<Integer> {
         // 6. 初始化 AI 服务
         AIService ai = new AIService(config);
 
-        // 6.5. 注册 TaskTool + TodoWrite（依赖 AIService / TodoManager）
+        // 6.5. 后台任务 + Todo + Task（依赖 AIService）
+        BackgroundManager bgManager = new BackgroundManager();
+        BackgroundRunTool bgRun = new BackgroundRunTool(bgManager);
+        CheckBackgroundTool bgCheck = new CheckBackgroundTool(bgManager);
+        registry.register(bgRun); dispatcher.register(bgRun);
+        registry.register(bgCheck); dispatcher.register(bgCheck);
+
         TodoManager todoManager = new TodoManager();
         TodoWriteTool todoWrite = new TodoWriteTool(todoManager);
         registry.register(todoWrite);
@@ -90,7 +96,7 @@ public class Main implements Callable<Integer> {
         // 7. 初始化核心组件
         CompactService compact = new CompactService(ai, config.getCompactThreshold());
         ContextBuilder ctxBuilder = new ContextBuilder(registry, memory, config);
-        AgentLoop loop = new AgentLoop(ai, dispatcher, compact, ctxBuilder, todoManager);
+        AgentLoop loop = new AgentLoop(ai, dispatcher, compact, ctxBuilder, todoManager, bgManager);
         loop.init();
 
         // 8. 运行
