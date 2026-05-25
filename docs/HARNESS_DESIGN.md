@@ -78,9 +78,9 @@
 3. **零依赖：** 不需要 JDBC、不需要 Redis、不需要任何外部服务
 4. **索引模式：** MEMORY.md 做索引（全量注入 System Prompt），具体文件按需加载（Agent 用 FileTool 读取）。两层模式——索引轻量，内容按需
 
-**五种类型（user/feedback/project/reference/task）：** 不是随便分的。每种类型有不同的保存时机和生命周期。user 是偏好（稳定），project 是上下文（随项目变），feedback 是纠偏（及时更新）。分类是为了让 MEMORY.md 索引可读，不是给 Agent 加复杂度。
+**四种类型（user/feedback/project/reference）：** 不是随便分的。每种类型有不同的保存时机和生命周期。user 是偏好（稳定），project 是上下文（随项目变），feedback 是纠偏（及时更新）。分类是为了让 MEMORY.md 索引可读，不是给 Agent 加复杂度。
 
-**采访话术：** "记忆系统用了 Markdown 文件 + 索引模式。MEMORY.md 做索引全量注入，五种类型分类管理。不需要数据库，人可以直接打开看 AI 记住了什么。和 Claude Code 的记忆系统是同一种设计哲学。"
+**采访话术：** "记忆系统用了 Markdown 文件 + 索引模式。MEMORY.md 做索引全量注入，四种类型分类管理。不需要数据库，人可以直接打开看 AI 记住了什么。和 Claude Code 的记忆系统是同一种设计哲学。"
 
 ---
 

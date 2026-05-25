@@ -20,7 +20,7 @@ public class MemoryManager {
     private static final String INDEX_FILE = "MEMORY.md";
 
     public enum MemoryType {
-        USER, FEEDBACK, PROJECT, REFERENCE, TASK
+        USER, FEEDBACK, PROJECT, REFERENCE
     }
 
     public MemoryManager(String memoryDir) {

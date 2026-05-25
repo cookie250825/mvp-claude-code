@@ -1,7 +1,7 @@
 package com.agent.memory;
 
 public class MemoryItem {
-    public enum MemoryType { USER, FEEDBACK, PROJECT, REFERENCE, TASK }
+    public enum MemoryType { USER, FEEDBACK, PROJECT, REFERENCE }
 
     private final MemoryType type;
     private final String name;

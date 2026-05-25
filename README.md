@@ -23,7 +23,7 @@
 - **Agent 核心循环** — while(true) 永不改动，所有功能底盘
 - **手写 MCP 协议** — JSON-RPC over stdio，零 MCP SDK 依赖，面试能深讲 10 分钟
 - **三层上下文压缩** — Micro（静默裁剪）→ Auto（LLM 摘要）→ Manual（用户触发）
-- **文件型记忆系统** — MEMORY.md 索引 + 五种类型，跨会话持久化，人可读
+- **文件型记忆系统** — MEMORY.md 索引 + 四种类型，跨会话持久化，人可读
 - **子 Agent 隔离** — 独立上下文 + 防递归，天然线程安全
 - **工具 JSON Schema** — 精确到参数级别的类型定义，LLM 一次调用成功
 - **错误自愈** — LLM 异常 → `<error>` 注入上下文继续，不崩溃
@@ -62,7 +62,7 @@ mvp-claude-code/
 │   │
 │   ├── 📁 memory/                      # 💾 记忆系统
 │   │   ├── MemoryItem.java             # 记忆项数据结构
-│   │   └── MemoryManager.java          # MEMORY.md 索引 + 五种类型文件
+│   │   └── MemoryManager.java          # MEMORY.md 索引 + 四种类型文件
 │   │
 │   └── 📁 config/                      # ⚙️ 配置管理
 │       └── AppConfig.java              # SnakeYAML 配置加载 + 环境变量插值
@@ -130,7 +130,7 @@ while(true) 是所有功能的底盘。每轮迭代：microCompact → autoCompa
 
 ### `memory/` — 记忆系统
 
-**MemoryManager.java** — `~/.agent/memory/` 目录下管理 MEMORY.md 索引 + 五种类型文件（user/feedback/project/reference/task）。索引全量注入 System Prompt，具体文件按需加载。
+**MemoryManager.java** — `~/.agent/memory/` 目录下管理 MEMORY.md 索引 + 四种类型文件（user/feedback/project/reference）。索引全量注入 System Prompt，具体文件按需加载。
 
 ### `config/` — 配置管理
 
@@ -307,9 +307,9 @@ learn-claude-code 也是三层（micro/auto/manual），但每层的策略和我
 | 项目 | 做法 |
 |------|------|
 | learn-claude-code | ❌ **无独立语义记忆** — 只有转录落盘（S06）+ 任务 JSON（S07）+ 团队配置（S09） |
-| **我们** | **MEMORY.md 索引 + 五种类型文件** — 自研，灵感来自 Claude Code 产品行为 |
+| **我们** | **MEMORY.md 索引 + 四种类型文件** — 自研，灵感来自 Claude Code 产品行为 |
 
-- **理由：** Markdown 文件人可读、Git 友好、零依赖。五种类型（user/feedback/project/reference/task）让 MEMORY.md 索引可读。
+- **理由：** Markdown 文件人可读、Git 友好、零依赖。四种类型（user/feedback/project/reference）让 MEMORY.md 索引可读。
 - **二层模式：** 索引全量注入 System Prompt（轻量），Agent 需要时用 FileTool 读取具体文件（按需）。
 - **本质区别：** learn-claude-code 记的是"发生过什么"（操作记录）。我们记的是"应该记住什么"（语义记忆）。
 
@@ -348,7 +348,7 @@ learn-claude-code 也是三层（micro/auto/manual），但每层的策略和我
 | API 协议 | Anthropic Native | OpenAI 兼容（DeepSeek） | 国内更便宜、更稳定 |
 | 工具定义 | 函数字典 | 抽象类 + Dispatch Map | 类型安全 + 运行时动态注册 |
 | 压缩策略 | 三层（Micro 占位符 / Auto 全量替换 / Manual 模型触发） | 三层（Micro 截断 / Auto 保留 10 条 / Manual 用户命令） | 同是三层，每层策略不同 |
-| 记忆系统 | ❌ 无（仅转录 + 任务） | MEMORY.md + 五种类型 | 自研，灵感来自 Claude Code 产品 |
+| 记忆系统 | ❌ 无（仅转录 + 任务） | MEMORY.md + 四种类型 | 自研，灵感来自 Claude Code 产品 |
 | Teammate | ❌ | ❌ | 偏离定位，面试讲不清 |
 | Todo 提醒 | ✅ 3 轮 nag | ✅ 同样实现 | Claude Code 真实行为 |
 | 流式输出 | ❌（同步阻塞调用） | ❌ | UI 层优化，核心架构不依赖 |
