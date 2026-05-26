@@ -144,8 +144,9 @@ public class Main implements Callable<Integer> {
 
         // ---- 步骤 10: 运行 ----
         if (prompt != null) {
-            // 单次模式：一句话 → 一个结果
-            System.out.println(loop.process(prompt));
+            // 单次模式：流式输出已在 AgentLoop 内打印，只需加末尾换行
+            loop.process(prompt);
+            System.out.println();
         } else {
             // 交互模式：持续对话
             runInteractive(loop);
@@ -178,8 +179,7 @@ public class Main implements Callable<Integer> {
                 case "/memory" -> System.out.println(loop.showMemory());
                 default -> {
                     try {
-                        String response = loop.process(line);
-                        System.out.println("\n" + response);
+                        loop.process(line);  // 流式输出已在 AgentLoop 内实时打印，不重复
                     } catch (Exception e) {
                         System.err.println("Error: " + e.getMessage());
                     }

@@ -176,6 +176,8 @@ public class AgentLoop {
             System.out.println();  // 流式输出结束后换行
 
             // ---- 步骤 5a: 工具确认（串行 — 用户需逐个看） ----
+            boolean usedTodo = false;
+            try {
             List<ToolExecutionRequest> approvedReqs = new ArrayList<>();
             for (ToolExecutionRequest req : aiMsg.toolExecutionRequests()) {
                 if (!confirmation.ask(req)) {
@@ -187,10 +189,7 @@ public class AgentLoop {
             }
 
             // ---- 步骤 5b: 工具执行（并行 — 互不依赖的工具同时跑） ----
-            boolean usedTodo = false;
             if (!approvedReqs.isEmpty()) {
-                // 提交所有获批工具到线程池并行执行
-                // 保存 req 引用：即使 future 炸了，也能告诉 LLM 是哪个工具挂了
                 List<ToolExecutionRequest> reqsInOrder = new ArrayList<>();
                 List<CompletableFuture<com.agent.tools.ToolResult>> futures = new ArrayList<>();
                 for (ToolExecutionRequest req : approvedReqs) {
@@ -200,7 +199,6 @@ public class AgentLoop {
                     ));
                 }
 
-                // 收集结果，保持 LLM 原始顺序写回 history
                 for (int i = 0; i < futures.size(); i++) {
                     ToolExecutionRequest req = reqsInOrder.get(i);
                     try {
@@ -212,12 +210,19 @@ public class AgentLoop {
                         history.add(ToolExecutionResultMessage.from(req, content));
                         if ("TodoWrite".equals(req.name())) usedTodo = true;
                     } catch (Exception e) {
-                        // 工具崩溃了，写进 history 告诉 LLM
                         log.warn("Tool {} crashed: {}", req.name(), e.getMessage());
                         history.add(ToolExecutionResultMessage.from(req,
                             "[tool crash] " + e.getMessage()));
                     }
                 }
+            }
+            } catch (Throwable t) {
+                // 最后防线：确认阶段或工具执行阶段出了 Error 级异常（OOM 等）
+                // 不能救的也写进 history，让 LLM 知道出事了，然后继续（而不是崩进程）
+                log.error("Catastrophic failure in tool phase", t);
+                history.add(UserMessage.from("<error>工具执行阶段发生严重错误: "
+                    + t.getClass().getSimpleName() + ": " + t.getMessage()
+                    + "。请换一种方法重试或直接返回当前结果。</error>"));
             }
 
             // ---- 步骤 6: Todo nag — 3 轮没更新就提醒 ----
