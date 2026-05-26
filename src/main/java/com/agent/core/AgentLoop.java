@@ -9,7 +9,6 @@ import org.slf4j.LoggerFactory;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
-import java.util.AbstractMap.SimpleEntry;
 
 /**
  * Agent 核心循环 — 整个项目的"心脏"。
@@ -169,30 +168,32 @@ public class AgentLoop {
             boolean usedTodo = false;
             if (!approvedReqs.isEmpty()) {
                 // 提交所有获批工具到线程池并行执行
-                List<CompletableFuture<SimpleEntry<ToolExecutionRequest, com.agent.tools.ToolResult>>> futures =
-                    new ArrayList<>();
+                // 保存 req 引用：即使 future 炸了，也能告诉 LLM 是哪个工具挂了
+                List<ToolExecutionRequest> reqsInOrder = new ArrayList<>();
+                List<CompletableFuture<com.agent.tools.ToolResult>> futures = new ArrayList<>();
                 for (ToolExecutionRequest req : approvedReqs) {
+                    reqsInOrder.add(req);
                     futures.add(CompletableFuture.supplyAsync(() ->
-                        new SimpleEntry<>(req, tools.execute(req))
+                        tools.execute(req)
                     ));
                 }
 
                 // 收集结果，保持 LLM 原始顺序写回 history
-                for (var future : futures) {
+                for (int i = 0; i < futures.size(); i++) {
+                    ToolExecutionRequest req = reqsInOrder.get(i);
                     try {
-                        var entry = future.get();  // 阻塞等这个工具执行完
-                        ToolExecutionRequest req = entry.getKey();
-                        com.agent.tools.ToolResult result = entry.getValue();
-
+                        com.agent.tools.ToolResult result = futures.get(i).get();
                         String content = result.getContent();
                         if (content == null || content.isBlank()) {
                             content = result.isSuccess() ? "[empty]" : "[error]";
                         }
                         history.add(ToolExecutionResultMessage.from(req, content));
-
                         if ("TodoWrite".equals(req.name())) usedTodo = true;
                     } catch (Exception e) {
-                        log.warn("Parallel tool execution failed", e);
+                        // 工具崩溃了，写进 history 告诉 LLM
+                        log.warn("Tool {} crashed: {}", req.name(), e.getMessage());
+                        history.add(ToolExecutionResultMessage.from(req,
+                            "[tool crash] " + e.getMessage()));
                     }
                 }
             }

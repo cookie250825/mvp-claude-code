@@ -112,13 +112,13 @@ mvp-claude-code/
 │   ├── Main.java                       # 🎯 Picocli CLI 入口（-i 交互 / -p 单次）
 │   │
 │   ├── 📁 core/                        # 🔧 核心引擎
-│   │   ├── AgentLoop.java              # while(true) 主循环（流式 + 确认）
+│   │   ├── AgentLoop.java              # while(true) 主循环（流式 + 确认 + 并行执行）
 │   │   ├── AIService.java              # DeepSeek API 封装（双模：同步+流式）
 │   │   ├── BackgroundManager.java      # 后台异步任务管理器（线程池+通知队列）
 │   │   ├── CompactService.java         # 三层上下文压缩
 │   │   ├── ContextBuilder.java         # ChatRequest 拼装 + Prompt Caching 前缀分离
-│   │   ├── SubagentRunner.java         # 子 Agent 隔离执行（对齐 AgentLoop）
-│   │   ├── ToolDispatcher.java         # Dispatch Map 工具分发
+│   │   ├── SubagentRunner.java         # 四种 SubAgent + 双层安全保障
+│   │   ├── ToolDispatcher.java         # Dispatch Map（黑名单/白名单过滤）
 │   │   └── ToolExecutionConfirmation.java  # 工具执行确认（y/n/a 三级）
 │   │
 │   ├── 📁 tools/                       # 🔨 工具集合
@@ -128,7 +128,7 @@ mvp-claude-code/
 │   │   ├── CheckBackgroundTool.java    # 后台任务状态查询工具
 │   │   ├── FileTool.java               # 文件读写（含 ~ 路径展开）
 │   │   ├── SearchTool.java             # 文本搜索（支持 ext 过滤）
-│   │   ├── TaskTool.java               # 子任务委托（调用 SubagentRunner）
+│   │   ├── TaskTool.java               # 子任务委托（四种 agent_type）
 │   │   ├── TodoManager.java            # Todo 状态管理（内存）
 │   │   ├── TodoWriteTool.java          # TodoWrite 工具（Claude Code 风格）
 │   │   ├── ToolRegistry.java           # 工具注册表（ToolSpecification 管理）
@@ -449,15 +449,16 @@ learn-claude-code 也是三层（micro/auto/manual），但每层的策略和我
 
 ---
 
-### SubagentRunner：为什么是上下文隔离而不是线程隔离
+### SubagentRunner：四种专用类型 + 双层安全保障（对标 Claude Code）
 
 | 项目 | 做法 |
 |------|------|
 | learn-claude-code (s_full) | `agent_type` 区分工具集（Explore 默认只给 bash+read；非 Explore 给全部） |
-| **我们** | **一律去 task 工具，其他全给** — 更简单 |
+| **我们** | **四种专用类型（EXPLORE/PLAN/VERIFICATION/GENERAL）+ 双层安全** |
 
-- **理由：** 子 Agent 在父线程同步执行（父需等子返回结果）。独立性靠 `subHistory`（新 ArrayList）保证，不共享任何可变状态，天然线程安全。
-- **防递归：** 在工具定义层面切断——子 Agent 的 ToolSpec 列表里没有 "task"，LLM 根本不知道有这个工具。
+- **四种类型：** 每个类型有不同的工具集安全边界——EXPLORE 黑名单去 bash/write，PLAN 白名单仅 file+search（最严），VERIFICATION 可跑只读诊断，GENERAL 除 task 外全有。
+- **双层安全：** 第一道物理隔离（工具不在 Dispatch Map 里就调不了）；第二道 Prompt 否定指令（NEVER/FORBIDDEN）。Prompt 失效 ≠ 安全失效——第一道防线不依赖 LLM 听话。
+- **防递归：** 所有类型都物理移除 task 工具——在能力层截断，不是执行层拦截。
 
 ---
 
