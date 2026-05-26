@@ -106,6 +106,12 @@ public class AppConfig {
     // ---- Context 配置 ----
     /** token 超过这个阈值触发 auto compact */
     public int getCompactThreshold() { return num("context", "compactThreshold", 50000); }
+    /** 最大轮次：0 = 不限制（靠 token 预算），>0 = 轮次上限。默认 0（token 预算制） */
+    public int getMaxRounds()        { return num("context", "maxRounds", 0); }
+    /** 上下文窗口大小（模型限制，DeepSeek 默认 128K） */
+    public int getMaxContextTokens() { return num("context", "maxContextTokens", 128000); }
+    /** 上下文水位危险比例：用量达到此比例时先压缩，压不下来再熔断 */
+    public double getContextDangerRatio() { return dbl("context", "contextDangerRatio", 0.9); }
 
     // ---- Memory 配置 ----
     /** 记忆文件存储目录（~ 展开为 user.home） */

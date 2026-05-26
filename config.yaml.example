@@ -16,7 +16,10 @@ tools:
         args: ["-y", "@modelcontextprotocol/server-filesystem", "."]
 
 context:
-  compactThreshold: 50000
+  compactThreshold: 50000              # token 阈值，触发 auto compact
+  maxRounds: 0                         # 最大轮次：0=不限（靠 token 预算），>0=轮次上限
+  maxContextTokens: 128000             # 上下文窗口大小（DeepSeek/Claude 默认 128K）
+  contextDangerRatio: 0.9              # 水位危险比例：用量达 90% 触发压缩，95% 熔断
 
 memory:
   dir: ~/.agent/memory

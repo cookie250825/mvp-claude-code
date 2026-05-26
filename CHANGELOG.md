@@ -1,5 +1,14 @@
 # Changelog
 
+## v1.5.0 — Token 预算制替代轮次上限 (2026-05-26)
+
+### 变更
+- **Token 预算制** — 用上下文水位替代硬编码 30 轮上限。对标 Claude Code AUTOCOMPACT_BUFFER_TOKENS 机制
+- **三级熔断 + 自主卸载**：水位 <90% 继续；90-95% 压缩；连续 3 次压不下来 → 注入 `<warning>` 给 LLM 自主决策（调 Plan Agent 拆分 / task 卸载 / 返回结果）。给 LLM 一轮机会反应，无视则硬终止
+- **LLM 自主卸载** — 熔断时不直接 return，而是注入警告让 LLM 自己决定：调 task(agent_type='plan') 拆分方案 → task(agent_type='general') 逐个子任务执行（子 Agent 独立上下文不占主空间）
+
+---
+
 ## v1.4.0 — 并行工具执行 + 四种 SubAgent 类型 (2026-05-26)
 
 ### 新增

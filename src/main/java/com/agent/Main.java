@@ -138,7 +138,8 @@ public class Main implements Callable<Integer> {
         // ---- 步骤 9: 组装核心组件 ----
         CompactService compact = new CompactService(ai, config.getCompactThreshold());
         ContextBuilder ctxBuilder = new ContextBuilder(registry, memory, config);
-        AgentLoop loop = new AgentLoop(ai, dispatcher, compact, ctxBuilder, todoManager, bgManager, confirmation);
+        AgentLoop loop = new AgentLoop(ai, dispatcher, compact, ctxBuilder, todoManager, bgManager,
+            confirmation, config.getMaxRounds(), config.getMaxContextTokens(), config.getContextDangerRatio());
         loop.init();
 
         // ---- 步骤 10: 运行 ----

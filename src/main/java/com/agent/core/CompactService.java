@@ -192,7 +192,11 @@ public class CompactService {
      * @param history 对话历史
      * @return 估算的 token 数
      */
-    private int estimateTokens(List<ChatMessage> history) {
+    /**
+     * 估算 token 数 — 公开给 AgentLoop 做 token 预算检查。
+     * 规则：字符数 / 4。不准但够用。
+     */
+    public int estimateTokens(List<ChatMessage> history) {
         return history.stream().mapToInt(m -> m.toString().length() / 4).sum();
     }
 

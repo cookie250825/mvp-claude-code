@@ -87,7 +87,7 @@ flowchart TD
 
 ## 项目特性
 
-- **Agent 核心循环** — while(true) 永不改动，所有功能底盘
+- **Token 预算制 + 熔断** — 不限轮次，限上下文水位。水位 <90% 继续，90-95% 压缩后继续，连续 3 次压不下来熔断（对标 Claude Code）
 - **流式输出** — 同步 API 用于摘要，流式 API 用于主对话，CompletableFuture 桥接
 - **并行工具执行** — LLM 一次返回的互不依赖工具调用，确认后 CompletableFuture 线程池并行执行
 - **四种 SubAgent 类型** — Explore（只读探索）/ Plan（方案设计）/ Verification（验证审查）/ General（通用），对标 Claude Code
@@ -157,18 +157,21 @@ mvp-claude-code/
 
 ### `core/` — 核心引擎
 
-**AgentLoop.java** — 永不改动的循环（流式 + 确认 + 并行执行）
+**AgentLoop.java** — 永不改动的循环（流式 + 确认 + 并行 + Token 预算）
 
-while(true) 是所有功能的底盘。每轮迭代：microCompact → autoCompact → 流式 LLM 调用（异常不崩溃）→ 工具确认（y/n/a，串行）→ 工具执行（CompletableFuture 线程池并行）→ Todo nag → 循环。30 轮上限保护。
+while(true) 是所有功能的底盘。每轮迭代：microCompact → autoCompact → 流式 LLM 调用（异常不崩溃）→ 工具确认（y/n/a，串行）→ 工具执行（CompletableFuture 线程池并行）→ Todo nag → **Token 预算检查** → 循环。
 
-核心流程：
-```
-用户输入 → background drain → microCompact → autoCompact?
-→ streamingChat (流式打印token) → 有工具调用?
-  → 是: ToolExecutionConfirmation (y/n/a, 串行确认)
-       → CompletableFuture.supplyAsync (并行执行)
-       → 收集结果写回 history → nag? → 下一轮
-  → 否: 返回最终文本
+**Token 预算三级熔断（对标 Claude Code）：**
+1. 水位 < 90% → 安全，继续
+2. 水位 90-95% → 触发 compact 压缩，有效继续，无效 failureCount+1
+3. 连续 3 次压缩无效 → 熔断，提示"用 task 拆分任务"
+
+```yaml
+# config.yaml 可配
+context:
+  maxRounds: 0           # 0=不限轮次，靠 token 预算
+  maxContextTokens: 128000
+  contextDangerRatio: 0.9
 ```
 
 **AIService.java** — AI 服务封装（双模）
@@ -282,6 +285,9 @@ tools:
 
 context:
   compactThreshold: 50000              # token 阈值，触发 auto compact
+  maxRounds: 0                         # 最大轮次：0=不限（靠 token 预算），>0=轮次上限
+  maxContextTokens: 128000             # 上下文窗口大小
+  contextDangerRatio: 0.9              # 水位达 90% 触发压缩，95% 熔断
 
 memory:
   dir: ~/.agent/memory                 # 记忆文件存储目录
