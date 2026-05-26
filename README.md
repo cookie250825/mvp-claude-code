@@ -89,17 +89,18 @@ flowchart TD
 
 - **Agent 核心循环** — while(true) 永不改动，所有功能底盘
 - **流式输出** — 同步 API 用于摘要，流式 API 用于主对话，CompletableFuture 桥接
+- **并行工具执行** — LLM 一次返回的互不依赖工具调用，确认后 CompletableFuture 线程池并行执行
+- **四种 SubAgent 类型** — Explore（只读探索）/ Plan（方案设计）/ Verification（验证审查）/ General（通用），对标 Claude Code
+- **SubAgent 双层安全** — 第一道物理隔离（工具不在 Dispatch Map 里就调不了），第二道 Prompt 否定指令（NEVER/FORBIDDEN），Prompt 失效 ≠ 安全失效
 - **工具执行确认** — 交互模式 y/n/a 三级确认，用户否决写回 history 让 LLM 调整策略
 - **Prompt Caching 架构** — 可缓存前缀分离（System + Memory + Tools），跨请求复用，节省 30-50% token
 - **手写 MCP 协议** — JSON-RPC over stdio，零 MCP SDK 依赖，面试能深讲 10 分钟
 - **三层上下文压缩** — Micro（静默裁剪）→ Auto（LLM 摘要）→ Manual（用户触发）
-- **SubagentRunner 架构对齐** — microCompact + 错误注入 + 工具自动批准，与 AgentLoop 完全对等
 - **文件型记忆系统** — MEMORY.md 索引 + 四种类型，跨会话持久化，人可读
 - **子 Agent 隔离** — 独立上下文 + 防递归，天然线程安全
-- **工具 JSON Schema** — 精确到参数级别的类型定义，LLM 一次调用成功
+- **Todo 追踪** — TodoWrite 工具 + 3 条硬约束（最多20条、仅1条in_progress、禁止批量completed）+ 3 轮 nag 提醒
 - **后台异步任务** — BackgroundManager 线程池 + 通知队列，长时间任务不阻塞主循环
 - **错误自愈** — LLM 异常 → `<error>` 注入上下文继续，不崩溃
-- **Todo 追踪** — TodoWrite 工具 + 3 轮未更新自动提醒
 - **MCP 生态接入** — 自动发现外部 MCP Server 工具（filesystem/github/postgres 等）
 - **极简依赖** — 仅 7 个 Maven 依赖，无数据库，无 DI 容器
 
@@ -156,15 +157,17 @@ mvp-claude-code/
 
 ### `core/` — 核心引擎
 
-**AgentLoop.java** — 永不改动的循环（流式 + 确认）
+**AgentLoop.java** — 永不改动的循环（流式 + 确认 + 并行执行）
 
-while(true) 是所有功能的底盘。每轮迭代：microCompact → autoCompact → 流式 LLM 调用（异常不崩溃）→ 工具确认（y/n/a）→ 工具执行 → 循环。30 轮上限保护。TDD（Todo-Driven Development）nag 提醒。
+while(true) 是所有功能的底盘。每轮迭代：microCompact → autoCompact → 流式 LLM 调用（异常不崩溃）→ 工具确认（y/n/a，串行）→ 工具执行（CompletableFuture 线程池并行）→ Todo nag → 循环。30 轮上限保护。
 
 核心流程：
 ```
 用户输入 → background drain → microCompact → autoCompact?
 → streamingChat (流式打印token) → 有工具调用?
-  → 是: ToolExecutionConfirmation (y/n/a) → 执行 → 写结果回 history → nag? → 下一轮
+  → 是: ToolExecutionConfirmation (y/n/a, 串行确认)
+       → CompletableFuture.supplyAsync (并行执行)
+       → 收集结果写回 history → nag? → 下一轮
   → 否: 返回最终文本
 ```
 
@@ -200,13 +203,20 @@ AiMessage aiMsg = future.get();          // 阻塞等待，拿到含工具调用
 
 **缓存原理：** LLM API 比较相邻请求的公共前缀。前缀分离后，System Prompt、Memory 索引、工具声明在每次请求中完全相同——DeepSeek/Claude 自动识别并缓存，节省 30-50% token 成本。不需要显式 cache_control 标记，结构设计本身就自带缓存优化。
 
-**SubagentRunner.java** — 子 Agent 隔离
+**SubagentRunner.java** — 四种专用子 Agent + 双层安全
 
-独立 `messages[]` + 去 task 工具的 `ToolDispatcher`，同步执行，天然线程安全。防递归在工具定义层面切断。
+四种类型对标 Claude Code 泄露架构。第一道防线：物理隔离（工具不在 Dispatch Map 里就调不了）；第二道防线：Prompt 否定指令（NEVER/FORBIDDEN）。Prompt 失效 ≠ 安全失效。
+
+| 类型 | 可用工具 | 移除 | 防线模式 |
+|------|---------|------|---------|
+| EXPLORE | file, search | bash, write, task, TodoWrite | 黑名单 |
+| PLAN | file, search | 其他全部 | **白名单（最严）** |
+| VERIFICATION | file, search, bash | write, task, TodoWrite | 黑名单 |
+| GENERAL | 除 task 外全有 | task | 黑名单 |
 
 **ToolDispatcher.java** — Dispatch Map
 
-`Map<String, BaseTool>` 查表执行。支持运行时动态注册/注销（MCP 工具）。`withoutTaskTool()` 一行代码创建子 Agent 工具集。
+`Map<String, BaseTool>` 查表执行。支持 `without(name...)` 黑名单和 `only(name...)` 白名单两种过滤模式，运行时动态注册/注销（MCP 工具）。白名单模式用于 Plan Agent（只留 file+search，其他全部砍掉）。
 
 **BackgroundManager.java** — 后台异步任务管理器
 
@@ -220,7 +230,7 @@ AiMessage aiMsg = future.get();          // 阻塞等待，拿到含工具调用
 
 **SearchTool** — 文本搜索，支持 pattern + ext 过滤，最多 50 条结果
 
-**TaskTool** — 子任务委托，调用 SubagentRunner，参数：prompt + maxRounds
+**TaskTool** — 子任务委托，调用 SubagentRunner。参数：prompt + agent_type(explore/plan/verification/general) + maxRounds。LLM 按需选择 Agent 类型，每种有不同的安全边界
 
 **BackgroundRunTool** — 启动后台任务，立即返回任务 ID，不阻塞 Agent 循环。适用于编译等耗时操作
 
@@ -462,10 +472,13 @@ learn-claude-code 也是三层（micro/auto/manual），但每层的策略和我
 | 压缩策略 | 三层（Micro 占位符 / Auto 全量替换 / Manual 模型触发） | 三层（Micro 截断 / Auto 保留 10 条 / Manual 用户命令） | 同是三层，每层策略不同 |
 | 记忆系统 | ❌ 无（仅转录 + 任务） | MEMORY.md + 四种类型 | 自研，灵感来自 Claude Code 产品 |
 | Teammate | ❌ | ❌ | 偏离定位，面试讲不清 |
-| Todo 提醒 | ✅ 3 轮 nag | ✅ 同样实现 | Claude Code 真实行为 |
+| Todo 提醒 | ✅ 3 轮 nag | ✅ 同样实现 + 3 条硬约束 | Claude Code 真实行为 |
 | 流式输出 | ❌（同步阻塞调用） | **✅ CompletableFuture 桥接 async→sync** | 用户体验底线 |
 | 工具确认 | ❌ | **✅ y/n/a 三级确认** | 安全防线 |
+| 并行工具执行 | ❌ | **✅ CompletableFuture 线程池** | 减少 API 调用轮次 |
 | Prompt Caching | ❌ | **✅ 前缀分离架构** | 结构自带缓存，面试加分 |
+| SubAgent 类型 | 1 种（Explore） | **✅ 4 种（Explore/Plan/Verification/General）** | 对标 Claude Code 泄露架构 |
+| SubAgent 安全 | 工具层去 task | **✅ 双层（物理隔离 + Prompt NEVER）** | Prompt 失效 ≠ 安全失效 |
 | 会话管理 | ❌（无持久化会话） | ❌ | MVP 阶段不需要 |
 
 ## 为什么你应该关注这个项目
