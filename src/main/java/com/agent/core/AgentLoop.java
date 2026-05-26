@@ -42,7 +42,7 @@ public class AgentLoop {
         for (int round = 1; round <= MAX_ROUNDS; round++) {
             // S08: 排空后台任务完成通知，注入上下文
             if (bgManager != null) {
-                java.util.List<java.util.Map<String, Object>> notifs = bgManager.drain();
+                java.util.List<java.util.Map<String, Object>> notifs = bgManager.drain();//消息队列注入
                 if (!notifs.isEmpty()) {
                     StringBuilder txt = new StringBuilder("<background-results>\n");
                     for (var n : notifs) {

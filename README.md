@@ -8,6 +8,65 @@
 >
 > 不依赖 Spring Boot。核心命题：Model 是司机（决定做什么），Harness 是车辆（决定能做什么）——后端工程师造的是车。
 
+## 整体流程图
+
+```mermaid
+flowchart TD
+    A([用户输入]) --> B[Main.java\nPicocli CLI 入口]
+    B --> C{模式}
+    C -->|交互模式 -i| D[AgentLoop.process]
+    C -->|单次模式 -p| D
+
+    D --> E[ContextBuilder.build\n拼装 ChatRequest\nSystem + Memory + History + Tools]
+    E --> F[AIService.chat\nDeepSeek / LangChain4j]
+
+    F -->|LLM 异常| G[注入 error 消息\n继续下一轮]
+    G --> H{达到 MAX_ROUNDS=30?}
+
+    F -->|纯文本响应| I([输出给用户 ✅])
+
+    F -->|含工具调用| J[ToolDispatcher.execute\nDispatch Map 路由]
+
+    J --> K{工具类型}
+    K -->|file| L[FileTool\n读写/列目录]
+    K -->|bash| M[BashTool\nShell 命令 30s超时]
+    K -->|search| N[SearchTool\n文本搜索]
+    K -->|task| O[TaskTool → SubagentRunner\n子 Agent 隔离执行]
+    K -->|todo_write| P[TodoWriteTool\nTodo 状态管理]
+    K -->|MCP 工具| Q[MCPClient\nJSON-RPC over stdio\n外部 MCP Server]
+
+    O -->|独立 history + 去 task 工具集| R[子 AgentLoop\n防递归]
+    R --> F
+
+    L & M & N & P & Q --> S[ToolExecutionResultMessage\n写回 history]
+    S --> T{Todo 3轮未更新?}
+    T -->|是| U[注入 reminder 提醒]
+    T -->|否| V[microCompact\n旧输出 >2000字 → 截断500]
+    U --> V
+    V --> W{token > 阈值?}
+    W -->|是 autoCompact| X[LLM 摘要\n保留最近10条]
+    W -->|否| H
+    X --> H
+    H -->|未达到| E
+    H -->|已达到| Y([返回超限提示])
+
+    subgraph 记忆系统
+        Z[MemoryManager\nMEMORY.md 索引\n~/.agent/memory/]
+        Z -->|全量注入| E
+    end
+
+    subgraph 后台任务
+        BG[BackgroundManager\n消息队列]
+        BG -->|drain 注入| D
+    end
+
+    style A fill:#4CAF50,color:#fff
+    style I fill:#4CAF50,color:#fff
+    style Y fill:#f44336,color:#fff
+    style F fill:#2196F3,color:#fff
+    style Q fill:#9C27B0,color:#fff
+```
+
 ## 项目演示
 
 ```
