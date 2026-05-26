@@ -1,12 +1,14 @@
 package com.agent.core;
 
+import dev.langchain4j.agent.tool.ToolExecutionRequest;
 import dev.langchain4j.data.message.*;
-import dev.langchain4j.model.chat.response.ChatResponse;
+import dev.langchain4j.model.chat.request.ChatRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
 
 public class AgentLoop {
     private static final Logger log = LoggerFactory.getLogger(AgentLoop.class);
@@ -18,21 +20,23 @@ public class AgentLoop {
     private final ContextBuilder ctx;
     private final com.agent.tools.TodoManager todoManager;
     private final BackgroundManager bgManager;
+    private final ToolExecutionConfirmation confirmation;
     private List<ChatMessage> history = new ArrayList<>();
 
     public AgentLoop(AIService ai, ToolDispatcher tools, CompactService compact,
                      ContextBuilder ctx, com.agent.tools.TodoManager todoManager,
-                     BackgroundManager bgManager) {
+                     BackgroundManager bgManager, ToolExecutionConfirmation confirmation) {
         this.ai = ai;
         this.tools = tools;
         this.compact = compact;
         this.ctx = ctx;
         this.todoManager = todoManager;
         this.bgManager = bgManager;
+        this.confirmation = confirmation;
     }
 
     public void init() {
-        log.info("AgentLoop initialized");
+        log.info("AgentLoop initialized (streaming mode)");
     }
 
     public String process(String input) {
@@ -42,7 +46,7 @@ public class AgentLoop {
         for (int round = 1; round <= MAX_ROUNDS; round++) {
             // S08: 排空后台任务完成通知，注入上下文
             if (bgManager != null) {
-                java.util.List<java.util.Map<String, Object>> notifs = bgManager.drain();//消息队列注入
+                java.util.List<java.util.Map<String, Object>> notifs = bgManager.drain();
                 if (!notifs.isEmpty()) {
                     StringBuilder txt = new StringBuilder("<background-results>\n");
                     for (var n : notifs) {
@@ -62,36 +66,51 @@ public class AgentLoop {
                 history = compact.compact(history);
             }
 
-            // LLM 调用
-            ChatResponse resp;
+            // LLM 调用 — 流式输出 + 错误自愈
+            ChatRequest request = ctx.build(history);
             AiMessage aiMsg;
             try {
-                resp = ai.chat(ctx.build(history));
-                aiMsg = resp.aiMessage();
+                CompletableFuture<AiMessage> future = ai.streamingChat(
+                    request.messages(),
+                    request.toolSpecifications(),
+                    token -> System.out.print(token)  // 实时流式打印
+                );
+                aiMsg = future.get();  // 阻塞等待流式完成
             } catch (Exception e) {
-                // F4/B1: 错误注入 — 不崩溃，把异常包装成消息让 LLM 自愈
                 log.warn("LLM call failed, injecting error: {}", e.getMessage());
                 history.add(UserMessage.from("<error>LLM call failed: " + e.getMessage()
                     + ". Please retry or change approach.</error>"));
                 continue;
             }
 
+            // 纯文本响应 → 直接返回
             if (!aiMsg.hasToolExecutionRequests()) {
                 history.add(aiMsg);
                 return aiMsg.text();
             }
 
+            // 有工具调用 → 确认后执行
             history.add(aiMsg);
+            System.out.println();  // 流式输出后换行
+
             boolean usedTodo = false;
-            for (var req : aiMsg.toolExecutionRequests()) {
+            for (ToolExecutionRequest req : aiMsg.toolExecutionRequests()) {
+                if (!confirmation.ask(req)) {
+                    history.add(ToolExecutionResultMessage.from(req, "User denied tool execution"));
+                    System.out.println("   ⏭️  已跳过");
+                    continue;
+                }
+
                 var result = tools.execute(req);
                 String content = result.getContent();
                 if (content == null || content.isBlank()) {
                     content = result.isSuccess() ? "[empty]" : "[error]";
                 }
                 history.add(ToolExecutionResultMessage.from(req, content));
+
                 if ("TodoWrite".equals(req.name())) usedTodo = true;
             }
+
             // F5: nag — 3 轮没更新 Todo 且有待办项时注入提醒
             roundsWithoutTodo = usedTodo ? 0 : roundsWithoutTodo + 1;
             if (todoManager.hasOpenItems() && roundsWithoutTodo >= 3) {
@@ -99,7 +118,6 @@ public class AgentLoop {
             }
         }
 
-        // Q1: 最大轮次保护
         return "[达到最大轮次 " + MAX_ROUNDS + "，任务未完成。请考虑缩小任务范围或使用 /compact 释放上下文。]";
     }
 

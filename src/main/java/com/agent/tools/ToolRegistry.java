@@ -46,4 +46,14 @@ public class ToolRegistry {
         return new HashMap<>(tools);
     }
 
+    /** 返回工具名称列表，用于 System Prompt 中的工具声明 */
+    public String describeNames() {
+        StringBuilder sb = new StringBuilder();
+        for (String name : tools.keySet()) {
+            if (sb.length() > 0) sb.append(", ");
+            sb.append(name);
+        }
+        return sb.toString();
+    }
+
 }

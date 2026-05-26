@@ -17,54 +17,62 @@ flowchart TD
     C -->|交互模式 -i| D[AgentLoop.process]
     C -->|单次模式 -p| D
 
-    D --> E[ContextBuilder.build\n拼装 ChatRequest\nSystem + Memory + History + Tools]
-    E --> F[AIService.chat\nDeepSeek / LangChain4j]
+    D --> D2[BackgroundManager.drain\n后台任务通知注入]
+    D2 --> D3[microCompact\n旧工具输出裁剪]
+    D3 --> D4{token > 阈值?}
+    D4 -->|是 autoCompact| D5[LLM 摘要压缩]
+    D4 -->|否| E
+    D5 --> E
+
+    E[ContextBuilder.build\n可缓存前缀 + 动态历史\nSystemPrompt + Memory + Tools + History]
+
+    E --> F[AIService.streamingChat\n流式输出 token\nDeepSeek Streaming API]
 
     F -->|LLM 异常| G[注入 error 消息\n继续下一轮]
     G --> H{达到 MAX_ROUNDS=30?}
 
-    F -->|纯文本响应| I([输出给用户 ✅])
+    F -->|纯文本响应| I([流式输出给用户 ✅])
 
-    F -->|含工具调用| J[ToolDispatcher.execute\nDispatch Map 路由]
+    F -->|含工具调用| TC[ToolExecutionConfirmation.ask\n用户确认 y/n/a]
+
+    TC -->|用户拒绝 n| RJ[写入 denied 消息\nLLM 调整策略]
+    RJ --> H
+
+    TC -->|用户批准 y/a| J[ToolDispatcher.execute\nDispatch Map 路由]
 
     J --> K{工具类型}
     K -->|file| L[FileTool\n读写/列目录]
     K -->|bash| M[BashTool\nShell 命令 30s超时]
     K -->|search| N[SearchTool\n文本搜索]
-    K -->|task| O[TaskTool → SubagentRunner\n子 Agent 隔离执行]
-    K -->|todo_write| P[TodoWriteTool\nTodo 状态管理]
+    K -->|task| O[TaskTool → SubagentRunner\n独立上下文 + microCompact\n+ 错误注入 + 防递归]
+    K -->|TodoWrite| P[TodoWriteTool\nTodo 状态管理]
     K -->|MCP 工具| Q[MCPClient\nJSON-RPC over stdio\n外部 MCP Server]
-
-    O -->|独立 history + 去 task 工具集| R[子 AgentLoop\n防递归]
-    R --> F
 
     L & M & N & P & Q --> S[ToolExecutionResultMessage\n写回 history]
     S --> T{Todo 3轮未更新?}
     T -->|是| U[注入 reminder 提醒]
-    T -->|否| V[microCompact\n旧输出 >2000字 → 截断500]
-    U --> V
-    V --> W{token > 阈值?}
-    W -->|是 autoCompact| X[LLM 摘要\n保留最近10条]
-    W -->|否| H
-    X --> H
+    T -->|否| H
+    U --> H
     H -->|未达到| E
     H -->|已达到| Y([返回超限提示])
+
+    subgraph 缓存优化["Prompt Caching 缓存优化"]
+        CP[可缓存前缀\nSystem Prompt + Memory + 工具声明\n构造时固定 → 自动缓存命中]
+        CP -.->|复用| E
+    end
 
     subgraph 记忆系统
         Z[MemoryManager\nMEMORY.md 索引\n~/.agent/memory/]
         Z -->|全量注入| E
     end
 
-    subgraph 后台任务
-        BG[BackgroundManager\n消息队列]
-        BG -->|drain 注入| D
-    end
-
     style A fill:#4CAF50,color:#fff
     style I fill:#4CAF50,color:#fff
     style Y fill:#f44336,color:#fff
     style F fill:#2196F3,color:#fff
+    style TC fill:#FF9800,color:#fff
     style Q fill:#9C27B0,color:#fff
+    style CP fill:#00BCD4,color:#fff
 ```
 
 ## 项目演示
@@ -80,8 +88,12 @@ flowchart TD
 ## 项目特性
 
 - **Agent 核心循环** — while(true) 永不改动，所有功能底盘
+- **流式输出** — 同步 API 用于摘要，流式 API 用于主对话，CompletableFuture 桥接
+- **工具执行确认** — 交互模式 y/n/a 三级确认，用户否决写回 history 让 LLM 调整策略
+- **Prompt Caching 架构** — 可缓存前缀分离（System + Memory + Tools），跨请求复用，节省 30-50% token
 - **手写 MCP 协议** — JSON-RPC over stdio，零 MCP SDK 依赖，面试能深讲 10 分钟
 - **三层上下文压缩** — Micro（静默裁剪）→ Auto（LLM 摘要）→ Manual（用户触发）
+- **SubagentRunner 架构对齐** — microCompact + 错误注入 + 工具自动批准，与 AgentLoop 完全对等
 - **文件型记忆系统** — MEMORY.md 索引 + 四种类型，跨会话持久化，人可读
 - **子 Agent 隔离** — 独立上下文 + 防递归，天然线程安全
 - **工具 JSON Schema** — 精确到参数级别的类型定义，LLM 一次调用成功
@@ -98,12 +110,13 @@ mvp-claude-code/
 │   ├── Main.java                       # 🎯 Picocli CLI 入口（-i 交互 / -p 单次）
 │   │
 │   ├── 📁 core/                        # 🔧 核心引擎
-│   │   ├── AgentLoop.java              # while(true) 主循环（永不改动）
-│   │   ├── AIService.java              # DeepSeek API 封装（LangChain4j）
+│   │   ├── AgentLoop.java              # while(true) 主循环（流式 + 确认）
+│   │   ├── AIService.java              # DeepSeek API 封装（双模：同步+流式）
 │   │   ├── CompactService.java         # 三层上下文压缩
-│   │   ├── ContextBuilder.java         # ChatRequest 拼装（System + Memory + History + Tools）
-│   │   ├── SubagentRunner.java         # 子 Agent 隔离执行
-│   │   └── ToolDispatcher.java         # Dispatch Map 工具分发
+│   │   ├── ContextBuilder.java         # ChatRequest 拼装 + Prompt Caching 前缀分离
+│   │   ├── SubagentRunner.java         # 子 Agent 隔离执行（对齐 AgentLoop）
+│   │   ├── ToolDispatcher.java         # Dispatch Map 工具分发
+│   │   └── ToolExecutionConfirmation.java  # 工具执行确认（y/n/a 三级）
 │   │
 │   ├── 📁 tools/                       # 🔨 工具集合
 │   │   ├── BaseTool.java               # 工具抽象基类
@@ -139,13 +152,33 @@ mvp-claude-code/
 
 ### `core/` — 核心引擎
 
-**AgentLoop.java** — 永不改动的循环
+**AgentLoop.java** — 永不改动的循环（流式 + 确认）
 
-while(true) 是所有功能的底盘。每轮迭代：microCompact → autoCompact → LLM 调用（异常不崩溃）→ 工具执行 → 循环。30 轮上限保护。TDD（Todo-Driven Development）nag 提醒。
+while(true) 是所有功能的底盘。每轮迭代：microCompact → autoCompact → 流式 LLM 调用（异常不崩溃）→ 工具确认（y/n/a）→ 工具执行 → 循环。30 轮上限保护。TDD（Todo-Driven Development）nag 提醒。
 
-**AIService.java** — AI 服务封装
+核心流程：
+```
+用户输入 → background drain → microCompact → autoCompact?
+→ streamingChat (流式打印token) → 有工具调用?
+  → 是: ToolExecutionConfirmation (y/n/a) → 执行 → 写结果回 history → nag? → 下一轮
+  → 否: 返回最终文本
+```
 
-基于 LangChain4j `OpenAiChatModel`，对接 DeepSeek API。提供 `chat(ChatRequest)` 和 `chat(String)` 两种接口。不引入 `AiServices`，手动控制工具执行流程。
+**AIService.java** — AI 服务封装（双模）
+
+基于 LangChain4j，提供两种 API：
+- `ChatLanguageModel`（同步）— 用于 CompactService 摘要压缩，无需流式
+- `StreamingChatLanguageModel`（异步）— 用于 AgentLoop 主对话，`CompletableFuture<AiMessage>` 桥接 async → sync
+
+```java
+CompletableFuture<AiMessage> future = ai.streamingChat(messages, toolSpecs,
+    token -> System.out.print(token));  // 实时流式打印
+AiMessage aiMsg = future.get();          // 阻塞等待，拿到含工具调用的完整响应
+```
+
+设计要点：手写 `StreamingResponseHandler` 而不是用 `AiServices` 自动流式代理——我们需要控制 onNext（打印 token）、onComplete（拿工具调用）、onError（注入上下文）的每一步。**
+
+<｜｜DSML｜｜parameter name="replace_all" string="false">false
 
 **CompactService.java** — 三层上下文压缩
 
@@ -155,9 +188,11 @@ while(true) 是所有功能的底盘。每轮迭代：microCompact → autoCompa
 | Auto | token > 阈值 | LLM 摘要旧消息 + 保留最近 10 轮 | 一次 LLM 调用 |
 | Manual | `/compact` | 全量压缩 | 一次 LLM 调用 |
 
-**ContextBuilder.java** — 请求拼装
+**ContextBuilder.java** — 请求拼装 + Prompt Caching
 
-每次 LLM 调用前组装完整 `ChatRequest`：System Prompt → Memory 索引 → 对话历史 → 工具列表。四个固定槽位，避免 prompt 位置漂移。
+每次 LLM 调用前组装完整 `ChatRequest`：`可缓存前缀（System Prompt + Memory + 工具声明）→ 对话历史`。前缀在构造时计算一次，后续每次 `build()` 复用同一个 `List<ChatMessage>` 引用。
+
+**缓存原理：** LLM API 比较相邻请求的公共前缀。前缀分离后，System Prompt、Memory 索引、工具声明在每次请求中完全相同——DeepSeek/Claude 自动识别并缓存，节省 30-50% token 成本。不需要显式 cache_control 标记，结构设计本身就自带缓存优化。
 
 **SubagentRunner.java** — 子 Agent 隔离
 

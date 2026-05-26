@@ -11,22 +11,17 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Subagent 运行器 — 独立上下文，防止递归，线程安全
- * 每个 subagent 拥有独立的 messages[] 和工具集，与父 agent 不共享可变状态
+ * Subagent 运行器 — 独立上下文，防止递归，线程安全。
+ * 每个 subagent 拥有独立的 messages[] 和工具集，与父 agent 不共享可变状态。
+ *
+ * 与 AgentLoop 架构对齐：microCompact + autoCompact + 错误注入。
+ * 工具确认在此层自动批准（父 Agent 已授权，子 Agent 不再二次确认）。
  */
 public class SubagentRunner {
     private static final Logger log = LoggerFactory.getLogger(SubagentRunner.class);
 
     /**
-     * 同步运行一个子 Agent，返回摘要结果
-     *
-     * @param ai          AI 服务（共享，无状态）
-     * @param dispatcher  工具分发器（会被去掉 task 工具）
-     * @param registry    工具注册表（用于构建上下文）
-     * @param config      配置
-     * @param prompt      子任务描述
-     * @param maxRounds   最大工具调用轮次
-     * @return 子 Agent 的最终结果文本
+     * 同步运行一个子 Agent，返回摘要结果。
      */
     public static String run(AIService ai, ToolDispatcher dispatcher,
                               ToolRegistry registry, AppConfig config,
@@ -44,17 +39,32 @@ public class SubagentRunner {
         ToolRegistry subRegistry = registry.without("task");
         ContextBuilder subCtx = new ContextBuilder(subRegistry, null, config);
         CompactService subCompact = new CompactService(ai, config.getCompactThreshold());
+        // 子 Agent 工具自动批准 — 父 Agent 已授权
+        ToolExecutionConfirmation subConfirm = new ToolExecutionConfirmation(false);
 
         for (int round = 1; round <= maxRounds; round++) {
+            // microCompact — 静默裁剪旧工具输出（与 AgentLoop 对齐）
+            subHistory = subCompact.microCompact(subHistory);
+
+            // autoCompact — token 超阈值时 LLM 摘要
             if (subCompact.shouldCompact(subHistory)) {
                 subHistory = subCompact.compact(subHistory);
             }
 
-            ChatResponse resp = ai.chat(subCtx.build(subHistory));
-            AiMessage aiMsg = resp.aiMessage();
+            // LLM 调用 + 错误注入（与 AgentLoop 对齐）
+            ChatResponse resp;
+            AiMessage aiMsg;
+            try {
+                resp = ai.chat(subCtx.build(subHistory));
+                aiMsg = resp.aiMessage();
+            } catch (Exception e) {
+                log.warn("Subagent LLM call failed, injecting error: {}", e.getMessage());
+                subHistory.add(UserMessage.from("<error>LLM call failed: " + e.getMessage()
+                    + ". Please retry or change approach.</error>"));
+                continue;
+            }
 
             if (!aiMsg.hasToolExecutionRequests()) {
-                // 子 Agent 完成，返回结果
                 String result = aiMsg.text();
                 log.info("Subagent done after {} rounds", round);
                 return result;
@@ -62,6 +72,7 @@ public class SubagentRunner {
 
             subHistory.add(aiMsg);
             for (var req : aiMsg.toolExecutionRequests()) {
+                // 子 Agent 工具调用自动批准（不再二次确认）
                 var result = subDispatcher.execute(req);
                 String content = result.getContent();
                 if (content == null || content.isBlank()) content = "[empty]";

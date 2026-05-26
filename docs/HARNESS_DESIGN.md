@@ -126,13 +126,104 @@
 
 ---
 
+## 8. 流式输出 — 用户体验的底线
+
+**设计决策：** 同步 API 用于摘要，流式 API 用于主对话。
+
+```
+AIService
+├── model (同步)     → chat(String prompt)      → 摘要压缩、简单问答
+└── streamingModel   → streamingChat(messages)   → AgentLoop 主循环
+```
+
+**为什么需要两个 Model？** 摘要压缩（CompactService）不需要流式——它就是一瞬间的事，用户不坐在屏幕前等。但主对话必须流式——用户输入"帮我读 pom.xml"后看到 token 一个一个蹦出来，这是 AI 交互的基本体验。同步等待 30 秒，用户会以为程序卡死了。
+
+**实现细节：** 使用 `CompletableFuture<AiMessage>` 桥接异步流式调用和同步 while(true) 循环。`streamingModel.generate()` 是异步的（立即返回），但循环需要等待 AI 响应才能继续。`future.get()` 阻塞直到流式完成，然后在 onComplete 里拿到含工具调用的 `AiMessage`。
+
+**和 LangChain4j AiServices 的区别：** `AiServices` 也支持流式，但它是黑盒——token 怎么来的、何时结束、中间是否有工具调用，全在框架内部。手写 `StreamingResponseHandler` 让我们控制每一步：onNext 里实时打印，onComplete 里拿工具调用，onError 里注入上下文。
+
+---
+
+## 9. ToolExecutionConfirmation — 用户安全防线
+
+**设计决策：** 交互模式需确认，单次模式自动批准。
+
+```
+for (ToolExecutionRequest req : aiMsg.toolExecutionRequests()) {
+    if (!confirmation.ask(req)) {         ← 用户选择 n
+        history.add("User denied");       ← 告诉 LLM 被拒绝了
+        continue;
+    }
+    result = tools.execute(req);          ← 用户选择 y/a
+    history.add(ToolExecutionResultMessage.from(req, result));
+}
+```
+
+**三种选择：** y（执行这一次）、n（跳过这一次）、a（后续全部批准，不再询问）。
+
+**为什么用户拒绝也要写入 history？** 如果静默跳过，LLM 不知道工具被拒绝了，下一轮会再试同一个工具调用。把 "User denied tool execution" 写进 history，LLM 看到后会调整策略。
+
+**为什么不算 Harness 越界？** Harness 不决定"是否应该执行"，它只提供"用户有否决权"这个能力。决定权在用户手里。这是安全机制，不是执行逻辑。
+
+---
+
+## 10. Prompt Caching — 结构即缓存
+
+**设计决策：** 把每次 LLM 请求拆成「可缓存前缀」+「动态历史」。
+
+```
+ChatRequest = [System Prompt] + [Memory 索引] + [工具声明] + [对话历史]
+              ←—— 构造时计算一次，——→  ←—— 每次 build() 重新拼接 ——→
+              ←—— 完全不变 = 缓存命中 —→
+```
+
+**原理：** 所有 LLM API（DeepSeek/Claude/GPT）都会比较相邻请求的公共前缀。前缀越稳定、越长，缓存命中率越高。我把 System Prompt、Memory 索引、工具可用性声明固定在 `cachedPrefix` 里，同一个 `ContextBuilder` 实例的每次 `build()` 都复用相同的前缀 List。
+
+**三个缓存槽位：**
+| 槽位 | 内容 | 变化频率 | 缓存价值 |
+|------|------|---------|---------|
+| 1 | System Prompt | 永不改变 | 高（最长、最稳定） |
+| 2 | Memory 索引 | 跨会话恒定 | 中 |
+| 3 | 工具可用性声明 | 同会话不变 | 中 |
+
+**为什么不是显式 cache_control 断点？** 当前项目对接 DeepSeek API，DeepSeek 自动识别重复前缀并在服务端缓存，不需要显式标记。如果后续切换到 Claude API，再加 `cache_control: {"type": "ephemeral"}` 断点即可——架构已经预留了分离结构，加标记只是一行代码的事。
+
+**面试话术：** "上下文拼装不是简单拼接。我把请求拆成可缓存前缀和动态历史两部分——前缀在构造时固定，每次请求复用同一个对象引用。DeepSeek/Claude 等服务端会自动识别这种重复前缀并缓存，节省 30-50% 的 token 成本。结构设计本身就自带缓存优化。"
+
+---
+
+## 11. SubagentRunner 对齐 — 架构一致性
+
+**设计决策：** SubagentRunner 补齐 microCompact + 错误注入，与 AgentLoop 完全对齐。
+
+**补齐前：** SubagentRunner 只有 autoCompact（粗粒度 LLM 摘要），没有 microCompact（细粒度静默裁剪），没有错误注入（一次 API 抖动就中断）。
+
+**补齐后的对齐矩阵：**
+
+| 功能 | AgentLoop | SubagentRunner | 说明 |
+|------|-----------|---------------|------|
+| microCompact | ✅ | ✅ 新增 | 每轮裁剪 >2000 字工具输出 |
+| autoCompact | ✅ | ✅ 已有 | token 超阈值 LLM 摘要 |
+| 错误注入 | ✅ | ✅ 新增 | LLM 异常 → `<error>` 消息继续 |
+| Tool 确认 | ✅ 交互式 | ✅ 自动批准 | 子 Agent 不二次确认 |
+| Todo nag | ✅ | ❌ 不需要 | 子 Agent 不管理 Todo |
+| 后台任务 | ✅ | ❌ 不需要 | 子 Agent 同步执行 |
+
+**为什么子 Agent 的 Tool 确认是「自动批准」？** 父 Agent 已经决定委托任务给子 Agent，如果子 Agent 的每次工具调用还要再确认一次，用户体验就变成了"俄罗斯套娃式的确认弹窗"。子 Agent 用 `new ToolExecutionConfirmation(false)` —— 非交互模式，所有工具自动批准。
+
+**面试话术：** "子 Agent 和主 Agent 共享同一套循环架构——微裁剪、自动压缩、错误自愈全有。区别只在于子 Agent 不做 Todo 管理和用户确认。这种分层对齐让架构容易理解和维护。"
+
+---
+
 ## 总结：所有 Harness 组件的共性和边界
 
 | 组件 | 属于 Harness 的什么 | 不属于 Harness 的什么 |
 |------|-------------------|---------------------|
 | AgentLoop | 定义循环节奏 | 不定义具体执行步骤 |
+| AIService | 管理 API 通信方式（同步/流式） | 不决定 prompt 内容 |
 | ToolDispatcher | 管理工具注册表 | 不管理工具实现 |
-| ContextBuilder | 拼装请求结构 | 不决定对话内容 |
+| ToolExecutionConfirmation | 提供用户否决权 | 不决定是否应该执行 |
+| ContextBuilder | 拼装请求结构 + 缓存优化 | 不决定对话内容 |
 | CompactService | 管理上下文大小 | 不代替 LLM 决策 |
 | MemoryManager | 持久化跨会话信息 | 不解释记忆语义 |
 | MCPClient | 连接外部工具生态 | 不定义工具行为 |

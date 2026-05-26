@@ -93,10 +93,13 @@ public class Main implements Callable<Integer> {
         registry.register(taskTool);
         dispatcher.register(taskTool);
 
-        // 7. 初始化核心组件
+        // 7.5 工具确认组件（交互模式需确认，单次模式自动批准）
+        ToolExecutionConfirmation confirmation = new ToolExecutionConfirmation(prompt == null);
+
+        // 8. 初始化核心组件
         CompactService compact = new CompactService(ai, config.getCompactThreshold());
         ContextBuilder ctxBuilder = new ContextBuilder(registry, memory, config);
-        AgentLoop loop = new AgentLoop(ai, dispatcher, compact, ctxBuilder, todoManager, bgManager);
+        AgentLoop loop = new AgentLoop(ai, dispatcher, compact, ctxBuilder, todoManager, bgManager, confirmation);
         loop.init();
 
         // 8. 运行
@@ -112,7 +115,7 @@ public class Main implements Callable<Integer> {
 
     private void runInteractive(AgentLoop loop) {
         Scanner scanner = new Scanner(System.in);
-        System.out.println("Mini Claude Code 已就绪。输入 /quit 退出，/compact 压缩上下文，/memory 查看记忆。");
+        System.out.println("MVP Claude Code 已就绪。输入 /quit 退出，/compact 压缩上下文，/memory 查看记忆。");
 
         while (true) {
             System.out.print("\n> ");
