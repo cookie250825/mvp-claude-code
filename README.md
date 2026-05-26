@@ -87,20 +87,22 @@ flowchart TD
 
 ## 项目特性
 
-- **Token 预算制 + 熔断** — 不限轮次，限上下文水位。水位 <90% 继续，90-95% 压缩后继续，连续 3 次压不下来熔断（对标 Claude Code）
+- **Token 预算制 + 熔断** — 不限轮次，限上下文水位。水位 <90% 继续，90-95% 压缩后继续，连续 3 次压不下来注入警告让 LLM 自主卸载，无视则硬终止
 - **流式输出** — 同步 API 用于摘要，流式 API 用于主对话，CompletableFuture 桥接
 - **并行工具执行** — LLM 一次返回的互不依赖工具调用，确认后 CompletableFuture 线程池并行执行
+- **工具崩溃保护** — `catch(Throwable)` 兜底 OOM 等 Error，写 `[tool crash]` 进 history 让 LLM 换路，进程不崩
+- **压缩失败降级** — LLM 摘要失败时不丢旧消息，退化为纯裁剪（保留后一半）；连续 3 次失败放弃压缩等熔断接手（对标 Claude Code）
 - **四种 SubAgent 类型** — Explore（只读探索）/ Plan（方案设计）/ Verification（验证审查）/ General（通用），对标 Claude Code
 - **SubAgent 双层安全** — 第一道物理隔离（工具不在 Dispatch Map 里就调不了），第二道 Prompt 否定指令（NEVER/FORBIDDEN），Prompt 失效 ≠ 安全失效
 - **工具执行确认** — 交互模式 y/n/a 三级确认，用户否决写回 history 让 LLM 调整策略
 - **Prompt Caching 架构** — 可缓存前缀分离（System + Memory + Tools），跨请求复用，节省 30-50% token
 - **手写 MCP 协议** — JSON-RPC over stdio，零 MCP SDK 依赖，面试能深讲 10 分钟
-- **三层上下文压缩** — Micro（静默裁剪）→ Auto（LLM 摘要）→ Manual（用户触发）
+- **三层上下文压缩** — Micro（静默裁剪）→ Auto（LLM 摘要 + 失败降级）→ Manual（用户触发）
 - **文件型记忆系统** — MEMORY.md 索引 + 四种类型，跨会话持久化，人可读
 - **子 Agent 隔离** — 独立上下文 + 防递归，天然线程安全
 - **Todo 追踪** — TodoWrite 工具 + 3 条硬约束（最多20条、仅1条in_progress、禁止批量completed）+ 3 轮 nag 提醒
 - **后台异步任务** — BackgroundManager 线程池 + 通知队列，长时间任务不阻塞主循环
-- **错误自愈** — LLM 异常 → `<error>` 注入上下文继续，不崩溃
+- **错误自愈** — LLM 异常 → `<error>` 注入上下文继续；工具崩溃 → `[tool crash]` 让 LLM 换路
 - **MCP 生态接入** — 自动发现外部 MCP Server 工具（filesystem/github/postgres 等）
 - **极简依赖** — 仅 7 个 Maven 依赖，无数据库，无 DI 容器
 
@@ -192,13 +194,15 @@ AiMessage aiMsg = future.get();          // 阻塞等待，拿到含工具调用
 
 交互模式 y/n/a 三级确认。y 执行本次、n 跳过本次并写入 history 让 LLM 调整策略、a 后续全部批准。单次模式（-p）自动批准所有工具。
 
-**CompactService.java** — 三层上下文压缩
+**CompactService.java** — 三层上下文压缩 + 失败降级
 
-| 层 | 触发 | 策略 | API 成本 |
-|---|------|------|---------|
-| Micro | 每轮 | 旧工具输出 > 2000 字符 → 截到 500 + 标记 | 零 |
-| Auto | token > 阈值 | LLM 摘要旧消息 + 保留最近 10 轮 | 一次 LLM 调用 |
-| Manual | `/compact` | 全量压缩 | 一次 LLM 调用 |
+| 层 | 触发 | 策略 | API 成本 | 失败降级 |
+|---|------|------|---------|---------|
+| Micro | 每轮 | 旧工具输出 > 2000 字符 → 截到 500 + 标记 | 零 | 无（纯字符串操作，不失败） |
+| Auto | token > 阈值 | LLM 摘要旧消息 + 保留最近 10 轮 | 一次 LLM 调用 | 裁剪前一半旧消息保留后一半；连续 3 次失败放弃压缩等熔断 |
+| Manual | `/compact` | 全量压缩 | 一次 LLM 调用 | 同 Auto |
+
+**摘要失败不丢数据（对标 Claude Code）：** LLM 摘要 API 报错时，不会把旧消息全替换成"摘要生成失败"。第 1-2 次失败降级为纯裁剪（扔前一半留后一半），第 3 次放弃压缩原样返回等 Token 预算熔断接手。**用户消息在微裁剪中永远不受影响。**
 
 **ContextBuilder.java** — 请求拼装 + Prompt Caching
 

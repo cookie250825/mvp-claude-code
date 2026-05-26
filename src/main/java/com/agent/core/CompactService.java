@@ -56,8 +56,12 @@ public class CompactService {
     /** 裁剪后保留的字符数 */
     private static final int MICRO_KEEP_LENGTH = 500;
 
+    /** 连续压缩失败次数（对标 Claude Code MAX_CONSECUTIVE_FAILURES=3） */
+    private static final int MAX_CONSECUTIVE_FAILS = 3;
+
     private final AIService ai;
-    private final int threshold;  // token 阈值，超过就触发 auto compact
+    private final int threshold;
+    private int consecutiveFails = 0;  // token 阈值，超过就触发 auto compact
 
     /**
      * @param ai        AI 服务（用于 Auto/Manual 层的 LLM 摘要）
@@ -134,7 +138,7 @@ public class CompactService {
     public List<ChatMessage> compact(List<ChatMessage> history) {
         log.info("Compacting history, size: {}", history.size());
 
-        // 压缩前先保存一份到磁盘（转录）
+        // 压缩前先保存一份到磁盘（转录）——出事能回溯
         saveTranscript(history);
 
         // 切分：旧消息（需要摘要）vs 最近 10 条（保留不碰）
@@ -144,6 +148,33 @@ public class CompactService {
 
         // 调 LLM 把旧消息压缩
         String summary = summarize(old);
+
+        // 摘要失败不扔数据——退化为裁剪旧消息（对标 Claude Code：不丢用户消息）
+        if (summary.startsWith("摘要生成失败")) {
+            consecutiveFails++;
+            log.warn("Summarize failed (consecutive={}/{}), falling back",
+                consecutiveFails, MAX_CONSECUTIVE_FAILS);
+
+            List<ChatMessage> result = new ArrayList<>();
+            if (consecutiveFails >= MAX_CONSECUTIVE_FAILS) {
+                // 连续 3 次失败：放弃 compact，原样返回，等 token 预算熔断接手
+                result.add(SystemMessage.from("[压缩连续失败 " + consecutiveFails
+                    + " 次，放弃压缩。请尽快返回最终结果。]"));
+                result.addAll(recent);
+            } else {
+                // 降级：扔掉旧消息前一半（纯裁剪，零 LLM 成本），保留后一半 + 最近 10 条
+                int mid = old.size() / 2;
+                List<ChatMessage> keptOld = old.subList(mid, old.size());
+                result.add(SystemMessage.from("[压缩降级：LLM 摘要失败，裁剪了 " + mid
+                    + " 条旧消息，保留最近 " + (keptOld.size() + recent.size()) + " 条。]"));
+                result.addAll(keptOld);
+                result.addAll(recent);
+            }
+            return result;
+        }
+
+        // 成功：重置失败计数
+        consecutiveFails = 0;
 
         // 拼装：[摘要] + [最近 10 条]
         List<ChatMessage> result = new ArrayList<>();

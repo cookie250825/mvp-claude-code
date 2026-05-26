@@ -1,11 +1,19 @@
 # Changelog
 
-## v1.5.0 — Token 预算制替代轮次上限 (2026-05-26)
+## v1.5.0 — Token 预算制 + 熔断容错 (2026-05-26)
 
 ### 变更
-- **Token 预算制** — 用上下文水位替代硬编码 30 轮上限。对标 Claude Code AUTOCOMPACT_BUFFER_TOKENS 机制
-- **三级熔断 + 自主卸载**：水位 <90% 继续；90-95% 压缩；连续 3 次压不下来 → 注入 `<warning>` 给 LLM 自主决策（调 Plan Agent 拆分 / task 卸载 / 返回结果）。给 LLM 一轮机会反应，无视则硬终止
-- **LLM 自主卸载** — 熔断时不直接 return，而是注入警告让 LLM 自己决定：调 task(agent_type='plan') 拆分方案 → task(agent_type='general') 逐个子任务执行（子 Agent 独立上下文不占主空间）
+- **Token 预算制** — 用上下文水位替代硬编码 30 轮上限。对标 Claude Code AUTOCOMPACT_BUFFER_TOKENS 机制。maxRounds=0 时完全靠 token 预算
+- **三级熔断 + 自主卸载**：水位 <90% 继续；90-95% 压缩；连续 3 次压不下来 → 注入 `<warning>` 给 LLM 一轮自主决策机会（调 task 卸载 / 返回结果），无视则硬终止
+- **新增配置项** — `context.maxRounds`(0=不限)、`context.maxContextTokens`(128000)、`context.contextDangerRatio`(0.9)
+
+### 防御
+- **工具崩溃保护** — AgentLoop 外层 `catch(Throwable)` 兜底 OOM 等 Error 级异常，写 `[tool crash]` 进 history 让 LLM 换路，进程不崩
+- **Compact 摘要失败降级** — LLM 摘要 API 失败时不扔旧消息（之前会全部丢失），改为裁剪前一半保留后一半；连续 3 次失败放弃 compact 等熔断接手。对标 Claude Code MAX_CONSECUTIVE_FAILURES=3
+- **重复输出修复** — Main.java 交互/单次模式不再重复打印 AI 响应（流式已实时输出）
+
+### 改进
+- **System Prompt** — 加工具崩溃处理指导："如果 [tool crash] 说明工具出 bug，不要重试同一个调用，换路"
 
 ---
 
