@@ -10,6 +10,13 @@ import org.slf4j.LoggerFactory;
 
 import java.util.List;
 
+/**
+ * 后台任务查询工具 — LLM 用它来查异步任务有没有跑完。
+ *
+ * <h3>两种用法</h3>
+ * 1. 传 task_id → 查单个任务状态
+ * 2. 不传参数 → 列出所有后台任务
+ */
 public class CheckBackgroundTool extends BaseTool {
     private static final Logger log = LoggerFactory.getLogger(CheckBackgroundTool.class);
     private static final ObjectMapper mapper = new ObjectMapper();
@@ -21,6 +28,12 @@ public class CheckBackgroundTool extends BaseTool {
     @Override public String name() { return "check_background"; }
     @Override public String description() { return "查询后台任务状态。不传参数列出全部，传 task_id 查单个。"; }
 
+    /**
+     * 查询后台任务。
+     *
+     * @param arguments JSON 参数：task_id（可选，不传则列出全部）
+     * @return 任务状态文本
+     */
     @Override
     public ToolResult execute(String arguments) {
         try {
