@@ -1,5 +1,26 @@
 # Changelog
 
+## v1.3.0 — 流式输出 + 工具确认 + Prompt Caching (2026-05-26)
+
+### 新增
+- **流式输出** — AIService 双模设计：同步 `ChatLanguageModel` 用于摘要压缩，异步 `StreamingChatLanguageModel` 用于主对话。`CompletableFuture<AiMessage>` 桥接 async→sync，onNext 实时打印 token
+- **ToolExecutionConfirmation** — 工具执行确认组件，交互模式 y/n/a 三级确认。拒绝后写入 history 让 LLM 调整策略。单次模式（-p）自动批准
+- **Prompt Caching 架构** — ContextBuilder 拆分「可缓存前缀」（System Prompt + Memory + 工具声明，构造时固定）+「动态历史」。每次 build() 复用同一前缀引用，DeepSeek/Claude 自动缓存命中
+
+### 增强
+- **SubagentRunner 架构对齐** — 补齐 microCompact（静默裁剪）+ 错误注入（LLM 异常不崩溃），与 AgentLoop 完全对等
+- **AgentLoop 集成** — 流式输出 + 工具确认 + Todo nag + 错误注入，完整对齐
+
+### 改进
+- **ToolRegistry** — 新增 `describeNames()` 方法，用于 System Prompt 中的工具声明
+- **ContextBuilder** — 改进 System Prompt（工具使用指南 + 行为规范），提升 LLM 工具调用准确率
+
+### 文档
+- **README.md** — 更新流程图（流式 + 确认 + 缓存节点）、特性列表（+4 项）、模块说明（AIService/AgentLoop/ContextBuilder/SubagentRunner）、项目结构
+- **docs/HARNESS_DESIGN.md** — 新增 4 章设计文档：流式输出、工具确认、Prompt Caching、SubagentRunner 对齐。总结表扩展到 10 个组件
+
+---
+
 ## v1.2.0 — 后台异步任务 (2026-05-25)
 
 ### 新增
@@ -54,7 +75,7 @@
 - **SubagentRunner** — 独立上下文执行，防递归（去 task 工具），最大轮次限制，天然线程安全
 
 ### 记忆系统
-- **MemoryManager** — `~/.agent/memory/` 文件型记忆，MEMORY.md 索引 + 五种类型（user/feedback/project/reference/task），二层加载模式
+- **MemoryManager** — `~/.agent/memory/` 文件型记忆，MEMORY.md 索引 + 四种类型（user/feedback/project/reference），二层加载模式
 
 ### 配置
 - **AppConfig** — SnakeYAML 解析，`${ENV_VAR}` 环境变量插值，文件系统 → classpath 双路径加载
