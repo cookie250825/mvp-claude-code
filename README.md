@@ -97,6 +97,7 @@ flowchart TD
 - **文件型记忆系统** — MEMORY.md 索引 + 四种类型，跨会话持久化，人可读
 - **子 Agent 隔离** — 独立上下文 + 防递归，天然线程安全
 - **工具 JSON Schema** — 精确到参数级别的类型定义，LLM 一次调用成功
+- **后台异步任务** — BackgroundManager 线程池 + 通知队列，长时间任务不阻塞主循环
 - **错误自愈** — LLM 异常 → `<error>` 注入上下文继续，不崩溃
 - **Todo 追踪** — TodoWrite 工具 + 3 轮未更新自动提醒
 - **MCP 生态接入** — 自动发现外部 MCP Server 工具（filesystem/github/postgres 等）
@@ -112,6 +113,7 @@ mvp-claude-code/
 │   ├── 📁 core/                        # 🔧 核心引擎
 │   │   ├── AgentLoop.java              # while(true) 主循环（流式 + 确认）
 │   │   ├── AIService.java              # DeepSeek API 封装（双模：同步+流式）
+│   │   ├── BackgroundManager.java      # 后台异步任务管理器（线程池+通知队列）
 │   │   ├── CompactService.java         # 三层上下文压缩
 │   │   ├── ContextBuilder.java         # ChatRequest 拼装 + Prompt Caching 前缀分离
 │   │   ├── SubagentRunner.java         # 子 Agent 隔离执行（对齐 AgentLoop）
@@ -121,6 +123,8 @@ mvp-claude-code/
 │   ├── 📁 tools/                       # 🔨 工具集合
 │   │   ├── BaseTool.java               # 工具抽象基类
 │   │   ├── BashTool.java               # Shell 命令执行
+│   │   ├── BackgroundRunTool.java      # 后台任务启动工具
+│   │   ├── CheckBackgroundTool.java    # 后台任务状态查询工具
 │   │   ├── FileTool.java               # 文件读写（含 ~ 路径展开）
 │   │   ├── SearchTool.java             # 文本搜索（支持 ext 过滤）
 │   │   ├── TaskTool.java               # 子任务委托（调用 SubagentRunner）
@@ -204,6 +208,10 @@ AiMessage aiMsg = future.get();          // 阻塞等待，拿到含工具调用
 
 `Map<String, BaseTool>` 查表执行。支持运行时动态注册/注销（MCP 工具）。`withoutTaskTool()` 一行代码创建子 Agent 工具集。
 
+**BackgroundManager.java** — 后台异步任务管理器
+
+线程池执行长时间命令（编译、大型搜索），通知队列异步返回结果。AgentLoop 每轮 `drain()` 通知队列，自动注入 `<background-results>` 到上下文，不阻塞主循环。
+
 ### `tools/` — 工具集合
 
 **FileTool** — 文件操作（read/write/list/exists），含 `~` 路径展开和 50K 输出截断
@@ -214,9 +222,17 @@ AiMessage aiMsg = future.get();          // 阻塞等待，拿到含工具调用
 
 **TaskTool** — 子任务委托，调用 SubagentRunner，参数：prompt + maxRounds
 
+**BackgroundRunTool** — 启动后台任务，立即返回任务 ID，不阻塞 Agent 循环。适用于编译等耗时操作
+
+**CheckBackgroundTool** — 查询后台任务状态，支持查询单个（taskId）或全部任务
+
 **TodoWriteTool** — Claude Code 风格 Todo 管理，嵌套 JSON Schema（items 数组）
 
-**ToolRegistry** — 工具注册表，管理 `List<ToolSpecification>` + `Map<String, BaseTool>`
+**TodoManager** — Todo 状态管理（内存），`hasOpenItems()` 供 AgentLoop nag 检测
+
+**ToolRegistry** — 工具注册表，管理 `List<ToolSpecification>` + `Map<String, BaseTool>`，`without()` 副本用于子 Agent
+
+**ToolResult** — 统一工具返回值，空文本防护
 
 ### `mcp/` — MCP 协议
 
