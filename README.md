@@ -82,7 +82,7 @@ flowchart TD
 
 📊 汇总结果
 ├── 📦 Maven 依赖数: 7
-└── 📄 Java 源文件数: 21
+└── 📄 Java 源文件数: 25
 ```
 
 ## 项目特性
@@ -176,9 +176,11 @@ CompletableFuture<AiMessage> future = ai.streamingChat(messages, toolSpecs,
 AiMessage aiMsg = future.get();          // 阻塞等待，拿到含工具调用的完整响应
 ```
 
-设计要点：手写 `StreamingResponseHandler` 而不是用 `AiServices` 自动流式代理——我们需要控制 onNext（打印 token）、onComplete（拿工具调用）、onError（注入上下文）的每一步。**
+设计要点：手写 `StreamingResponseHandler` 而不是用 `AiServices` 自动流式代理——我们需要控制 onNext（打印 token）、onComplete（拿工具调用）、onError（注入上下文）的每一步。
 
-<｜｜DSML｜｜parameter name="replace_all" string="false">false
+**ToolExecutionConfirmation.java** — 工具执行确认
+
+交互模式 y/n/a 三级确认。y 执行本次、n 跳过本次并写入 history 让 LLM 调整策略、a 后续全部批准。单次模式（-p）自动批准所有工具。
 
 **CompactService.java** — 三层上下文压缩
 
@@ -275,7 +277,7 @@ security:
 
 ```bash
 # 1. 克隆
-git clone https://github.com/yourusername/mvp-claude-code.git
+git clone https://github.com/cookie250825/mvp-claude-code.git
 cd mvp-claude-code
 
 # 2. 配置 API Key
@@ -445,17 +447,22 @@ learn-claude-code 也是三层（micro/auto/manual），但每层的策略和我
 | 记忆系统 | ❌ 无（仅转录 + 任务） | MEMORY.md + 四种类型 | 自研，灵感来自 Claude Code 产品 |
 | Teammate | ❌ | ❌ | 偏离定位，面试讲不清 |
 | Todo 提醒 | ✅ 3 轮 nag | ✅ 同样实现 | Claude Code 真实行为 |
-| 流式输出 | ❌（同步阻塞调用） | ❌ | UI 层优化，核心架构不依赖 |
+| 流式输出 | ❌（同步阻塞调用） | **✅ CompletableFuture 桥接 async→sync** | 用户体验底线 |
+| 工具确认 | ❌ | **✅ y/n/a 三级确认** | 安全防线 |
+| Prompt Caching | ❌ | **✅ 前缀分离架构** | 结构自带缓存，面试加分 |
 | 会话管理 | ❌（无持久化会话） | ❌ | MVP 阶段不需要 |
 
 ## 为什么你应该关注这个项目
 
-- 想理解 **Agent 循环的本质** → 看 `core/AgentLoop.java`（80 行）
+- 想理解 **Agent 循环的本质** → 看 `core/AgentLoop.java`（100 行）
+- 想理解 **流式输出怎么实现** → 看 `core/AIService.java`（70 行）
 - 想理解 **MCP 协议怎么实现** → 看 `tools/mcp/MCPClient.java`（150 行）
-- 想理解 **上下文压缩怎么做** → 看 `core/CompactService.java`（100 行）
+- 想理解 **上下文压缩怎么做** → 看 `core/CompactService.java`（110 行）
+- 想理解 **Prompt Caching 怎么架构化** → 看 `core/ContextBuilder.java`（105 行）
 - 想理解 **AI 记忆系统怎么设计** → 看 `memory/MemoryManager.java`（100 行）
-- 想理解 **子 Agent 怎么隔离** → 看 `core/SubagentRunner.java`（75 行）
-- 想理解 **完整设计哲学** → 看 `docs/HARNESS_DESIGN.md`
+- 想理解 **子 Agent 怎么隔离** → 看 `core/SubagentRunner.java`（85 行）
+- 想理解 **工具确认怎么实现** → 看 `core/ToolExecutionConfirmation.java`（50 行）
+- 想理解 **完整设计哲学** → 看 `docs/HARNESS_DESIGN.md`（11 章）
 
 ## 设计哲学
 
