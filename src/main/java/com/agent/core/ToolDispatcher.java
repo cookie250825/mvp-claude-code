@@ -48,21 +48,49 @@ public class ToolDispatcher {
     }
 
     /**
-     * 创建不含 task 工具的副本 — 用于子 Agent 防递归。
+     * 创建不含指定工具的副本 — 物理隔离，不是 Prompt 建议。
      *
-     * <h3>为什么这样做能防递归</h3>
+     * <h3>防递归原理</h3>
      * 子 Agent 的工具列表里没有 "task"，
      * LLM 不知道有这个工具 = 永远不会产生"再开一个子 Agent"的想法。
      * 在能力层截断，不是执行层拦截。
      *
-     * @return 新的 ToolDispatcher，所有工具都一样，唯独没有 task
+     * <h3>安全保障原理</h3>
+     * 即使 Prompt 层否定指令（NEVER do X）被 LLM 无视，
+     * 工具层硬边界依然生效——LLM 调一个不存在的工具 → "Unknown tool" → 只能放弃。
+     *
+     * @param names 要移除的工具名列表
+     * @return 新的 ToolDispatcher，不含指定工具
      */
-    public ToolDispatcher withoutTaskTool() {
+    public ToolDispatcher without(String... names) {
         ToolDispatcher sub = new ToolDispatcher();
+        java.util.Set<String> toRemove = java.util.Set.of(names);
         map.forEach((k, v) -> {
-            if (!k.equals("task")) sub.register(v);
+            if (!toRemove.contains(k)) sub.register(v);
         });
         return sub;
+    }
+
+    /**
+     * 创建仅含指定工具的副本 — 白名单模式，比黑名单更安全。
+     * 用于 Plan Agent（只给读 + 搜索，其他全部砍掉）。
+     *
+     * @param names 要保留的工具名列表
+     * @return 新的 ToolDispatcher，仅含指定工具
+     */
+    public ToolDispatcher only(String... names) {
+        ToolDispatcher sub = new ToolDispatcher();
+        java.util.Set<String> toKeep = java.util.Set.of(names);
+        map.forEach((k, v) -> {
+            if (toKeep.contains(k)) sub.register(v);
+        });
+        return sub;
+    }
+
+    /** @deprecated 用 without("task") 替代 */
+    @Deprecated
+    public ToolDispatcher withoutTaskTool() {
+        return without("task");
     }
 
     /**

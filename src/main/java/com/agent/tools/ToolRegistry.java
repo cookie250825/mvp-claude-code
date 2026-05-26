@@ -60,21 +60,45 @@ public class ToolRegistry {
     }
 
     /**
-     * 创建不含指定工具的副本 — 用于子 Agent 防递归。
-     * 子 Agent 调用 registry.without("task") 获得一个没有 task 工具的新注册表。
+     * 创建不含指定工具的副本 — 黑名单模式（物理隔离）。
+     * 用于 Explore/Verification/General Agent：去掉 task + 写工具。
      *
-     * @param name 要排除的工具名
-     * @return 不含该工具的新 ToolRegistry
+     * @param names 要排除的工具名列表
+     * @return 不含这些工具的新 ToolRegistry
      */
-    public ToolRegistry without(String name) {
+    public ToolRegistry without(String... names) {
+        java.util.Set<String> toRemove = java.util.Set.of(names);
         ToolRegistry copy = new ToolRegistry();
         for (Map.Entry<String, BaseTool> entry : tools.entrySet()) {
-            if (!entry.getKey().equals(name)) {
+            if (!toRemove.contains(entry.getKey())) {
                 copy.tools.put(entry.getKey(), entry.getValue());
             }
         }
         for (ToolSpecification spec : specs) {
-            if (!spec.name().equals(name)) {
+            if (!toRemove.contains(spec.name())) {
+                copy.specs.add(spec);
+            }
+        }
+        return copy;
+    }
+
+    /**
+     * 创建仅含指定工具的副本 — 白名单模式（比黑名单更安全）。
+     * 用于 Plan Agent：只给 file + search，其他全部砍掉。
+     *
+     * @param names 要保留的工具名列表
+     * @return 仅含这些工具的新 ToolRegistry
+     */
+    public ToolRegistry only(String... names) {
+        java.util.Set<String> toKeep = java.util.Set.of(names);
+        ToolRegistry copy = new ToolRegistry();
+        for (Map.Entry<String, BaseTool> entry : tools.entrySet()) {
+            if (toKeep.contains(entry.getKey())) {
+                copy.tools.put(entry.getKey(), entry.getValue());
+            }
+        }
+        for (ToolSpecification spec : specs) {
+            if (toKeep.contains(spec.name())) {
                 copy.specs.add(spec);
             }
         }

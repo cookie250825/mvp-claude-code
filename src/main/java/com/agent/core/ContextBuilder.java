@@ -73,15 +73,21 @@ public class ContextBuilder {
             "核心原则:\n" +
             "- 主动使用工具完成任务，不要猜测，不要询问是否继续\n" +
             "- 复杂任务先用 TodoWrite 拆解为步骤清单，逐步执行并即时更新状态\n" +
+            "- 互不依赖的工具调用尽量在一次响应中并行返回，不要串行等待\n" +
             "- 文件操作前先 read 了解现有代码结构，避免盲目修改\n" +
             "- 遇到错误时检查工具返回信息，调整方法重试，不要放弃\n" +
             "- 完成后简要总结做了什么\n\n" +
+            "TodoWrite 使用规范（必须遵守）:\n" +
+            "- 最多 20 条 Todo 项，同时仅 1 条标记为 in_progress\n" +
+            "- 完成一条后立即单独标记为 completed，禁止批量标记多条完成\n" +
+            "- 每完成一步都要立刻调 TodoWrite 更新状态\n\n" +
             "工具指南:\n" +
-            "- file(read/write/edit/list): 文件读写，优先使用\n" +
+            "- file(read/write/list/exists): 文件读写，优先使用\n" +
             "- bash(command): 执行 Shell 命令，包括编译、运行、git 操作\n" +
             "- search(pattern, ext): 搜索文件内容，支持正则和文件类型过滤\n" +
-            "- task(prompt, maxRounds): 委托子 Agent 独立完成大规模探索\n" +
-            "- TodoWrite(items): 任务拆解与进度追踪，每完成一项立即标记 completed\n\n" +
+            "- task(prompt, agent_type, maxRounds): 启动专用子 Agent。\n" +
+            "  agent_type: explore(只读探索) / plan(方案设计) / verification(验证审查) / general(通用,默认)\n" +
+            "- TodoWrite(items): 任务拆解与进度追踪。严格遵守上述 TodoWrite 使用规范\n\n" +
             "工作目录: " + config.getWorkspace()
         ));
 

@@ -1,5 +1,23 @@
 # Changelog
 
+## v1.4.0 — 并行工具执行 + 四种 SubAgent 类型 (2026-05-26)
+
+### 新增
+- **并行工具执行** — AgentLoop 中 LLM 一次返回的多个互不依赖的工具调用，确认后通过 CompletableFuture 线程池并行执行。确认串行（用户逐个看参数），执行并行
+- **四种 SubAgent 类型** — 对标 Claude Code 泄露架构，SubagentRunner 支持四种专用 Agent：
+  - **EXPLORE**（探索） — 只能 file + search，物理移除 bash/write/task，Prompt 层 NEVER 指令
+  - **PLAN**（规划） — 白名单仅 file + search，FORBIDDEN 所有执行操作，只输出方案文本
+  - **VERIFICATION**（验证） — 可读文件 + 诊断 bash，NEVER 修改代码
+  - **GENERAL**（通用） — 除 task 外全部工具，防递归
+- **SubAgent 双层安全保障** — 第一道：工具层物理隔离（不在 Dispatch Map 里就调不了）；第二道：Prompt 层否定指令（NEVER/FORBIDDEN）。Prompt 失效 ≠ 安全失效
+
+### 增强
+- **TaskTool** — 新增 `agent_type` 枚举参数（explore/plan/verification/general），LLM 可按需选择 Agent 类型
+- **ToolDispatcher/ToolRegistry** — 新增 `without(String...)` 黑名单和 `only(String...)` 白名单过滤方法
+- **ContextBuilder System Prompt** — 新增 TodoWrite 三条硬约束（最多20条、仅1条in_progress、禁止批量completed）+ 并行工具调用提示 + task agent_type 参数说明
+
+---
+
 ## v1.3.0 — 流式输出 + 工具确认 + Prompt Caching (2026-05-26)
 
 ### 新增

@@ -9,12 +9,13 @@ import org.slf4j.LoggerFactory;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
+import java.util.AbstractMap.SimpleEntry;
 
 /**
  * Agent 核心循环 — 整个项目的"心脏"。
  *
  * <h3>一句话概括</h3>
- * 拿到用户输入 → 进入 while 循环 → 流式调用 LLM → 如果 LLM 说要调工具就确认后执行 →
+ * 拿到用户输入 → 进入 while 循环 → 流式调用 LLM → 如果 LLM 说要调工具就确认后并行执行 →
  * 工具结果写回对话历史 → 继续下一轮循环，直到 LLM 返回纯文本。
  *
  * <h3>为什么是 while(true) 手写循环</h3>
@@ -27,12 +28,16 @@ import java.util.concurrent.CompletableFuture;
  * 2. microCompact       — 零成本裁剪旧工具输出
  * 3. autoCompact?       — token 超了？LLM 摘要
  * 4. streamingChat      — 流式调 LLM，失败不崩溃
- * 5. 工具调用？          — 先确认再执行，结果写回 history
+ * 5. 工具调用？          — 先确认再并行执行，结果写回 history
  * 6. Todo nag?          — 3 轮没更新 Todo 就提醒
  *
  * <h3>30 轮上限</h3>
  * 不是功能需求，是保险丝。LLM 有时会陷入工具调用死循环（反复读同一个不存在的文件）。
  * 没上限就是真死循环，30 轮足够完成绝大多数任务。
+ *
+ * <h3>并行工具执行</h3>
+ * LLM 一次返回的多个工具调用如果互不依赖（如同时读 3 个文件），
+ * 确认后并行执行——确认串行（用户逐个看），执行并行。
  */
 public class AgentLoop {
     private static final Logger log = LoggerFactory.getLogger(AgentLoop.class);
@@ -149,30 +154,47 @@ public class AgentLoop {
             history.add(aiMsg);
             System.out.println();  // 流式输出结束后换行
 
-            boolean usedTodo = false;
+            // ---- 步骤 5a: 工具确认（串行 — 用户需逐个看） ----
+            List<ToolExecutionRequest> approvedReqs = new ArrayList<>();
             for (ToolExecutionRequest req : aiMsg.toolExecutionRequests()) {
-                // ---- 步骤 5a: 工具确认 ----
-                // 交互模式弹 y/n/a，单次模式自动批
                 if (!confirmation.ask(req)) {
-                    // 用户拒绝了 → 写进 history 告诉 LLM，LLM 下次会换方法
                     history.add(ToolExecutionResultMessage.from(req, "User denied tool execution"));
                     System.out.println("   ⏭️  已跳过");
                     continue;
                 }
+                approvedReqs.add(req);
+            }
 
-                // ---- 步骤 5b: 执行工具 ----
-                // Dispatch Map 查表，找到对应的 BaseTool，执行
-                var result = tools.execute(req);
-                String content = result.getContent();
-                if (content == null || content.isBlank()) {
-                    content = result.isSuccess() ? "[empty]" : "[error]";
+            // ---- 步骤 5b: 工具执行（并行 — 互不依赖的工具同时跑） ----
+            boolean usedTodo = false;
+            if (!approvedReqs.isEmpty()) {
+                // 提交所有获批工具到线程池并行执行
+                List<CompletableFuture<SimpleEntry<ToolExecutionRequest, com.agent.tools.ToolResult>>> futures =
+                    new ArrayList<>();
+                for (ToolExecutionRequest req : approvedReqs) {
+                    futures.add(CompletableFuture.supplyAsync(() ->
+                        new SimpleEntry<>(req, tools.execute(req))
+                    ));
                 }
-                // ---- 步骤 5c: 工具结果写回 history ----
-                // 关键：LLM 下轮能"看到"这一轮工具的结果，基于结果继续决策
-                history.add(ToolExecutionResultMessage.from(req, content));
 
-                // 记录这轮有没有用 TodoWrite
-                if ("TodoWrite".equals(req.name())) usedTodo = true;
+                // 收集结果，保持 LLM 原始顺序写回 history
+                for (var future : futures) {
+                    try {
+                        var entry = future.get();  // 阻塞等这个工具执行完
+                        ToolExecutionRequest req = entry.getKey();
+                        com.agent.tools.ToolResult result = entry.getValue();
+
+                        String content = result.getContent();
+                        if (content == null || content.isBlank()) {
+                            content = result.isSuccess() ? "[empty]" : "[error]";
+                        }
+                        history.add(ToolExecutionResultMessage.from(req, content));
+
+                        if ("TodoWrite".equals(req.name())) usedTodo = true;
+                    } catch (Exception e) {
+                        log.warn("Parallel tool execution failed", e);
+                    }
+                }
             }
 
             // ---- 步骤 6: Todo nag — 3 轮没更新就提醒 ----

@@ -113,7 +113,17 @@ public class MCPToolAdapter extends BaseTool {
                     switch (ptype) {
                         case "integer", "number" -> builder.addIntegerProperty(pname, pdesc);
                         case "boolean" -> builder.addBooleanProperty(pname, pdesc);
-                        case "array" -> builder.addProperty(pname, JsonArraySchema.builder().build());
+                        case "array" -> {
+                            // MCP array 类型必须提供 items schema，LangChain4j 强制非 null
+                            JsonNode itemsNode = pnode.path("items");
+                            String itemsType = itemsNode.path("type").asText("string");
+                            var itemSchema = switch (itemsType) {
+                                case "integer", "number" -> dev.langchain4j.model.chat.request.json.JsonIntegerSchema.builder().build();
+                                case "boolean" -> dev.langchain4j.model.chat.request.json.JsonBooleanSchema.builder().build();
+                                default -> dev.langchain4j.model.chat.request.json.JsonStringSchema.builder().build();
+                            };
+                            builder.addProperty(pname, JsonArraySchema.builder().items(itemSchema).build());
+                        }
                         default -> builder.addStringProperty(pname, pdesc);  // 默认 string
                     }
                 }
