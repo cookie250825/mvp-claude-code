@@ -70,8 +70,9 @@ public class Main implements Callable<Integer> {
         FileTool.initWorkspace(config.getSecurityWorkspace());
 
         // ---- 步骤 3: 初始化记忆系统 ----
-        // ~/.agent/memory/ 目录 + MEMORY.md 索引
-        MemoryManager memory = new MemoryManager(config.getMemoryDir());
+        // ~/.agent/memory/ 目录，按项目隔离：global/ + projects/<id>/
+        String projectId = java.nio.file.Path.of(config.getWorkspace()).getFileName().toString();
+        MemoryManager memory = new MemoryManager(config.getMemoryDir(), projectId);
 
         // ---- 步骤 4: 注册内置工具 ----
         // 基础三件套：读文件、跑命令、搜内容

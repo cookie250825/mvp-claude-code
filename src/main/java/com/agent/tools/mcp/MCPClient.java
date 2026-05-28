@@ -38,7 +38,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  */
 public class MCPClient {
     private static final Logger log = LoggerFactory.getLogger(MCPClient.class);
-    private static final ObjectMapper mapper = new ObjectMapper();
+    private static final ObjectMapper mapper = new ObjectMapper();//实现java和json转化的核心类
 
     /** JSON-RPC 请求 ID 生成器（线程安全） */
     private final AtomicInteger idGen = new AtomicInteger(1);

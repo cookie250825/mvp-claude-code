@@ -1,5 +1,25 @@
 # Changelog
 
+## v1.6.3 — MemoryManager 项目级隔离 (2026-05-28)
+
+### 新增
+- **记忆项目隔离** — 不同项目不再共享记忆。USER/REFERENCE/FEEDBACK 存 `global/`（全局），PROJECT 存 `projects/<项目名>/`。换项目自动切换
+- **MemoryManager(projectId)** — 新增双参数构造器，Main.java 用 workspace 目录名作为项目标识
+
+### 存储结构
+```
+~/.agent/memory/
+  global/MEMORY.md        ← USER + REFERENCE + FEEDBACK（全局，跟人不跟项目）
+  projects/MVP/MEMORY.md  ← PROJECT（项目专属）
+  projects/ThoughtCoding/MEMORY.md
+```
+
+### 修改文件
+- `memory/MemoryManager.java` — 重写为双目录架构，save/getIndex/delete 按类型路由
+- `Main.java` — 传入 workspace 目录名作为 projectId
+
+---
+
 ## v1.6.2 — 死代码清理 + CLAUDE.md 支持 (2026-05-28)
 
 ### 新增

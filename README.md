@@ -298,7 +298,7 @@ toolSpecifications:
 
 ### `memory/` — 记忆系统
 
-**MemoryManager.java** — `~/.agent/memory/` 目录下管理 MEMORY.md 索引 + 四种类型文件（user/feedback/project/reference）。parseIndex() 正则解析索引 → `List<MemoryItem>`，记忆操作走"parse → modify → write"模式。索引全量注入 System Prompt，具体文件按需加载。
+**MemoryManager.java** — 按项目隔离的文件型记忆。`global/` 存 USER/REFERENCE/FEEDBACK（跟人不跟项目），`projects/<项目名>/` 存 PROJECT（项目专属）。parseIndex() 正则解析 → `List<MemoryItem>`，save/delete 按类型路由到对应目录。索引全量注入 System Prompt，具体文件按需加载。
 
 **MemoryItem.java** — 记忆项 DTO，name/type/description/fileName 四个字段 + toString() 序列化为索引行。MemoryManager 内部全程用 MemoryItem 对象操作，不再手动拼字符串。
 

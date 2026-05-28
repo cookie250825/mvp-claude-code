@@ -13,53 +13,71 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * 记忆管理器 — 文件型记忆系统的核心。
+ * 记忆管理器 — 文件型记忆系统，按项目隔离。
  *
- * <h3>存在形式</h3>
- * ~/.agent/memory/ 下 MEMORY.md 为索引，每条记忆对应一个 .md 文件。
- * 索引行格式：- [名称](文件名.md) — 一行描述
+ * <h3>存储结构</h3>
+ * <pre>
+ * ~/.agent/memory/
+ *   global/MEMORY.md        — USER + REFERENCE + FEEDBACK（全局，跟人不跟项目）
+ *   projects/mvp/MEMORY.md  — PROJECT（项目级，换项目看不到）
+ *   projects/thoughtcoding/MEMORY.md
+ * </pre>
  *
- * <h3>二层加载</h3>
- * 第一层：MEMORY.md 索引全量注入 System Prompt（轻量，通常几百字）
- * 第二层：Agent 用 FileTool 读取具体 .md 文件（按需）
- *
- * <h3>数据模型</h3>
- * MemoryItem 是核心 DTO — 解析 MEMORY.md → List<MemoryItem>
- * → toString() 写回索引。name/type/description/fileName 四个字段完整覆盖。
+ * <h3>类型路由</h3>
+ * USER / REFERENCE / FEEDBACK → global/（人的属性，跨项目共享）
+ * PROJECT                     → projects/{id}/（项目专属）
  */
 public class MemoryManager {
     private static final Logger log = LoggerFactory.getLogger(MemoryManager.class);
     private static final String INDEX_FILE = "MEMORY.md";
-    /** 索引行正则：- [name](file.md) — description */
     private static final Pattern INDEX_LINE = Pattern.compile("- \\[(.+?)\\]\\((.+?)\\) — (.+)");
 
-    private final Path dir;
+    private final Path globalDir;
+    private final Path projectDir;
+    private final boolean hasProject;
 
+    /**
+     * @param memoryDir 记忆根目录（~ 展开为 user.home）
+     * @param projectId 项目标识（workspace 目录名），null 表示仅全局记忆
+     */
+    public MemoryManager(String memoryDir, String projectId) {
+        Path root = Paths.get(memoryDir.replace("~", System.getProperty("user.home")));
+        this.globalDir = root.resolve("global");
+        this.hasProject = projectId != null && !projectId.isBlank();
+        this.projectDir = hasProject ? root.resolve("projects").resolve(projectId) : null;
+        ensureDirs();
+    }
+
+    /** 向下兼容：不传 projectId 时只使用全局记忆 */
     public MemoryManager(String memoryDir) {
-        this.dir = Paths.get(memoryDir.replace("~", System.getProperty("user.home")));
-        ensureDir();
-        ensureIndex();
+        this(memoryDir, null);
     }
 
-    private void ensureDir() {
-        try { Files.createDirectories(dir); } catch (IOException e) { log.error("Failed to create memory dir", e); }
-    }
-
-    private void ensureIndex() {
-        Path indexPath = dir.resolve(INDEX_FILE);
-        if (!Files.exists(indexPath)) {
-            try {
-                Files.writeString(indexPath,
-                    "# Memory Index\n\n记忆文件索引，由 Agent 自动维护。\n\n## 文件列表\n\n");
-            } catch (IOException e) { log.error("Failed to create memory index", e); }
+    private void ensureDirs() {
+        try { Files.createDirectories(globalDir); ensureIndex(globalDir); }
+        catch (IOException e) { log.error("Failed to create global memory dir", e); }
+        if (hasProject) {
+            try { Files.createDirectories(projectDir); ensureIndex(projectDir); }
+            catch (IOException e) { log.error("Failed to create project memory dir", e); }
         }
     }
 
-    // ── 索引操作 ──
+    private void ensureIndex(Path dir) {
+        Path indexPath = dir.resolve(INDEX_FILE);
+        if (!Files.exists(indexPath)) {
+            try { Files.writeString(indexPath, "# Memory Index\n\n记忆文件索引，由 Agent 自动维护。\n\n## 文件列表\n\n"); }
+            catch (IOException e) { log.error("Failed to create index in {}", dir, e); }
+        }
+    }
 
-    /** 读取 MEMORY.md 索引文本（注入 System Prompt 用） */
+    // ── 读取 ──
+
+    /** 合并全局 + 项目记忆索引，注入 System Prompt */
     public String getIndex() {
-        List<MemoryItem> items = parseIndex();
+        List<MemoryItem> items = new ArrayList<>();
+        items.addAll(parseIndex(globalDir));
+        if (hasProject) items.addAll(parseIndex(projectDir));
+
         if (items.isEmpty()) return "（暂无记忆）";
         StringBuilder sb = new StringBuilder();
         for (MemoryItem item : items) {
@@ -68,11 +86,12 @@ public class MemoryManager {
         return sb.toString();
     }
 
-    /** 解析 MEMORY.md → MemoryItem 列表 */
-    private List<MemoryItem> parseIndex() {
+    private List<MemoryItem> parseIndex(Path dir) {
         List<MemoryItem> items = new ArrayList<>();
         try {
-            String content = Files.readString(dir.resolve(INDEX_FILE));
+            Path indexPath = dir.resolve(INDEX_FILE);
+            if (!Files.exists(indexPath)) return items;
+            String content = Files.readString(indexPath);
             for (String line : content.split("\n")) {
                 Matcher m = INDEX_LINE.matcher(line);
                 if (m.find()) {
@@ -83,11 +102,10 @@ public class MemoryManager {
                     items.add(new MemoryItem(type, name, desc, fileName));
                 }
             }
-        } catch (IOException e) { log.warn("Failed to parse memory index", e); }
+        } catch (IOException e) { log.warn("Failed to parse index in {}", dir, e); }
         return items;
     }
 
-    /** 从文件名前缀推断记忆类型 */
     private MemoryItem.MemoryType inferType(String fileName) {
         if (fileName.startsWith("user_"))      return MemoryItem.MemoryType.USER;
         if (fileName.startsWith("feedback_"))  return MemoryItem.MemoryType.FEEDBACK;
@@ -96,60 +114,87 @@ public class MemoryManager {
         return MemoryItem.MemoryType.PROJECT;
     }
 
-    /** 序列化 MemoryItem 列表 → 写入 MEMORY.md */
-    private void writeIndex(List<MemoryItem> items) {
-        try {
-            StringBuilder sb = new StringBuilder();
-            sb.append("# Memory Index\n\n记忆文件索引，由 Agent 自动维护。\n\n## 文件列表\n\n");
-            for (MemoryItem item : items) {
-                sb.append(item.toString()).append("\n");
-            }
-            Files.writeString(dir.resolve(INDEX_FILE), sb.toString());
-        } catch (IOException e) { log.error("Failed to write memory index", e); }
-    }
+    // ── 写入 ──
 
-    // ── CRUD ──
-
-    /** 加载记忆文件内容 */
+    /** 加载记忆文件内容（先查全局，再查项目） */
     public String load(String fileName) {
-        try { return Files.readString(dir.resolve(fileName)); }
-        catch (IOException e) { log.warn("Failed to load memory file: {}", fileName); return null; }
+        Path f = globalDir.resolve(fileName);
+        if (Files.exists(f)) return readFile(f);
+        if (hasProject) {
+            f = projectDir.resolve(fileName);
+            if (Files.exists(f)) return readFile(f);
+        }
+        return null;
     }
 
-    /** 保存一条记忆：写 .md 文件 + 更新索引 */
+    /** 保存一条记忆，按类型路由到全局或项目目录 */
     public void save(MemoryItem.MemoryType type, String name, String desc, String content) {
+        Path targetDir = isGlobalType(type) ? globalDir : projectDir;
+        if (targetDir == null) {
+            log.warn("Cannot save project memory without projectId");
+            return;
+        }
         String fileName = type.name().toLowerCase() + "_" + name + ".md";
         try {
-            Files.writeString(dir.resolve(fileName), content);
+            Files.writeString(targetDir.resolve(fileName), content);
             MemoryItem item = new MemoryItem(type, name, desc, fileName);
-            List<MemoryItem> items = parseIndex();
+            List<MemoryItem> items = parseIndex(targetDir);
             items.removeIf(i -> i.getFileName().equals(fileName));
             items.add(item);
-            writeIndex(items);
-            log.info("Saved memory: {}", fileName);
+            writeIndex(targetDir, items);
+            log.info("Saved memory: {} -> {}", fileName, targetDir);
         } catch (IOException e) { log.error("Failed to save memory: {}", fileName, e); }
     }
 
-    /** 删除一条记忆：删文件 + 从索引移除 */
+    /** 删除记忆（尝试两个目录） */
     public void delete(String fileName) {
-        try {
-            Files.deleteIfExists(dir.resolve(fileName));
-            List<MemoryItem> items = parseIndex();
-            items.removeIf(i -> i.getFileName().equals(fileName));
-            writeIndex(items);
-            log.info("Deleted memory: {}", fileName);
-        } catch (IOException e) { log.error("Failed to delete memory: {}", fileName, e); }
+        deleteFrom(globalDir, fileName);
+        if (hasProject) deleteFrom(projectDir, fileName);
     }
 
-    /** 列出指定类型的记忆文件名 */
+    /** 列出指定类型的记忆文件 */
     public List<String> listFiles(MemoryItem.MemoryType type) {
         List<String> result = new ArrayList<>();
+        Path targetDir = isGlobalType(type) ? globalDir : projectDir;
+        if (targetDir == null) return result;
+        String prefix = type.name().toLowerCase() + "_";
         try {
-            String prefix = type.name().toLowerCase() + "_";
-            Files.list(dir)
+            Files.list(targetDir)
                 .filter(p -> p.getFileName().toString().startsWith(prefix))
                 .forEach(p -> result.add(p.getFileName().toString()));
-        } catch (IOException e) { log.error("Failed to list memory files", e); }
+        } catch (IOException e) { log.error("Failed to list files in {}", targetDir, e); }
         return result;
+    }
+
+    // ── 内部 ──
+
+    private boolean isGlobalType(MemoryItem.MemoryType type) {
+        return switch (type) {
+            case USER, REFERENCE, FEEDBACK -> true;
+            case PROJECT -> false;
+        };
+    }
+
+    private void writeIndex(Path dir, List<MemoryItem> items) {
+        try {
+            StringBuilder sb = new StringBuilder();
+            sb.append("# Memory Index\n\n记忆文件索引，由 Agent 自动维护。\n\n## 文件列表\n\n");
+            for (MemoryItem item : items) sb.append(item.toString()).append("\n");
+            Files.writeString(dir.resolve(INDEX_FILE), sb.toString());
+        } catch (IOException e) { log.error("Failed to write index in {}", dir, e); }
+    }
+
+    private void deleteFrom(Path dir, String fileName) {
+        try {
+            Files.deleteIfExists(dir.resolve(fileName));
+            List<MemoryItem> items = parseIndex(dir);
+            items.removeIf(i -> i.getFileName().equals(fileName));
+            writeIndex(dir, items);
+        } catch (IOException e) { log.error("Failed to delete {} from {}", fileName, dir); }
+    }
+
+    private String readFile(Path path) {
+        try { return Files.readString(path); }
+        catch (IOException e) { log.warn("Failed to read {}", path); return null; }
     }
 }
