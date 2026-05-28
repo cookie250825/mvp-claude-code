@@ -94,6 +94,8 @@ flowchart TD
 - **压缩失败降级** — LLM 摘要失败时不丢旧消息，退化为纯裁剪（保留后一半）；连续 3 次失败放弃压缩等熔断接手（对标 Claude Code）
 - **四种 SubAgent 类型** — Explore（只读探索）/ Plan（方案设计）/ Verification（验证审查）/ General（通用），对标 Claude Code
 - **SubAgent 双层安全** — 第一道物理隔离（工具不在 Dispatch Map 里就调不了），第二道 Prompt 否定指令（NEVER/FORBIDDEN），Prompt 失效 ≠ 安全失效
+- **BashTool 只读白名单模式** — `new BashTool(true)` 只允许诊断类命令（java/mvn/git-status/ls/cat 等），VERIFICATION Agent 专用，第一道防线真正拦住破坏性写操作
+- **SubAgent 容错增强** — 连续 LLM 失败超阈值（3次）提前退出并返回部分结果；最大轮次耗尽时保留已有中间输出而非丢弃；LLM 失败指数退避（1s→2s→4s）
 - **工具执行确认** — 交互模式 y/n/a 三级确认，用户否决写回 history 让 LLM 调整策略
 - **Prompt Caching 架构** — 可缓存前缀分离（System + Memory + Tools），跨请求复用，节省 30-50% token
 - **手写 MCP 协议** — JSON-RPC over stdio，零 MCP SDK 依赖，面试能深讲 10 分钟

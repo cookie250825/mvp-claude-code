@@ -150,6 +150,10 @@ public class SubagentRunner {
         ToolExecutionConfirmation subConfirm = new ToolExecutionConfirmation(false);
 
         // ---- 步骤 4: 子循环（与 AgentLoop 完全对齐） ----
+        String lastPartialResult = null;  // 保留最后一次纯文本输出，超限时返回部分结果
+        int consecutiveFailures = 0;      // 连续 LLM 失败计数，超过阈值提前退出
+        final int MAX_CONSECUTIVE_FAILURES = 3;
+
         for (int round = 1; round <= maxRounds; round++) {
             // microCompact
             subHistory = subCompact.microCompact(subHistory);
@@ -159,14 +163,26 @@ public class SubagentRunner {
                 subHistory = subCompact.compact(subHistory);
             }
 
-            // LLM 调用 + 错误注入
+            // LLM 调用 + 错误注入（带退避和连续失败限制）
             ChatResponse resp;
             AiMessage aiMsg;
             try {
                 resp = ai.chat(subCtx.build(subHistory));
                 aiMsg = resp.aiMessage();
+                consecutiveFailures = 0;  // 成功则重置计数器
             } catch (Exception e) {
-                log.warn("Subagent[{}] LLM call failed, injecting error: {}", type, e.getMessage());
+                consecutiveFailures++;
+                log.warn("Subagent[{}] LLM call failed ({}/{}): {}",
+                    type, consecutiveFailures, MAX_CONSECUTIVE_FAILURES, e.getMessage());
+                if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
+                    log.error("Subagent[{}] 连续失败 {} 次，提前退出", type, consecutiveFailures);
+                    String partial = lastPartialResult != null
+                        ? "[部分结果]\n" + lastPartialResult + "\n[因 LLM 连续失败中止]"
+                        : "[Subagent(" + type + ") LLM 连续失败 " + consecutiveFailures + " 次，任务中止]";
+                    return partial;
+                }
+                // 指数退避：1s, 2s, 4s
+                try { Thread.sleep(1000L * (1 << (consecutiveFailures - 1))); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
                 subHistory.add(UserMessage.from("<error>LLM call failed: " + e.getMessage()
                     + ". Please retry or change approach.</error>"));
                 continue;
@@ -177,6 +193,11 @@ public class SubagentRunner {
                 String result = aiMsg.text();
                 log.info("Subagent[{}] done after {} rounds", type, round);
                 return result;
+            }
+
+            // 记录最后一次 AI 消息文本（作为部分结果备份）
+            if (aiMsg.text() != null && !aiMsg.text().isBlank()) {
+                lastPartialResult = aiMsg.text();
             }
 
             // 工具调用自动执行
@@ -190,6 +211,10 @@ public class SubagentRunner {
         }
 
         log.warn("Subagent[{}] reached max rounds: {}", type, maxRounds);
+        // 超限时返回部分结果（而非丢弃所有中间内容）
+        if (lastPartialResult != null) {
+            return "[部分结果（已达最大轮次 " + maxRounds + "，任务可能未完成）]\n" + lastPartialResult;
+        }
         return "[Subagent(" + type + ") 达到最大轮次 " + maxRounds + "，任务未完成]";
     }
 }

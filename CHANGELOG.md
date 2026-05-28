@@ -1,5 +1,19 @@
 # Changelog
 
+## v1.5.2 — SubAgent 安全加固 + 容错增强 (2026-05-28)
+
+### 安全修复
+- **BashTool 只读模式** — 新增 `BashTool(boolean readOnly)` 构造函数和 `READ_ONLY_WHITELIST` 白名单（java/mvn/git status/ls/cat/grep 等诊断类命令）。只读模式拒绝白名单外的所有命令，VERIFICATION Agent 专用
+- **VERIFICATION bash 实质限制** — BashTool 现在可以以只读模式实例化，从物理层面拦截破坏性命令（之前仅靠 Prompt 层 NEVER 指令，实为无效防线）
+
+### 容错增强
+- **连续 LLM 失败熔断** — 新增 `consecutiveFailures` 计数器，连续失败 ≥ 3 次提前退出，不再无限注入错误消息撑爆 history
+- **指数退避** — LLM 失败后退避 1s → 2s → 4s，减少无效重试压力
+- **部分结果保留** — 新增 `lastPartialResult` 变量，达到 maxRounds 上限时返回最后一次有效文本输出 + 未完成标记，而非丢弃所有中间内容
+- **AI 消息文本捕获** — 工具调用前记录 `aiMsg.text()` 作为备份，保证即使任务未完成也能返回有用内容
+
+---
+
 ## v1.5.1 — Prompt Caching 对齐 Claude Code (2026-05-28)
 
 ### 重构

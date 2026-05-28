@@ -22,8 +22,9 @@ import java.util.concurrent.TimeUnit;
  * <h3>安全机制</h3>
  * 1. 危险命令黑名单：rm -rf /、sudo、shutdown、reboot、mkfs.、dd if=、fork bomb、chmod 777 /、> /dev/sda
  *    在命令执行前检查，命中了直接拒绝
- * 2. 30 秒超时：命令运行超过 30 秒自动 kill，防死循环
- * 3. 输出截断：最多 50K 字符，防大输出撑爆上下文
+ * 2. 只读白名单模式（readOnly=true）：仅允许诊断类命令，VERIFICATION Agent 专用
+ * 3. 30 秒超时：命令运行超过 30 秒自动 kill，防死循环
+ * 4. 输出截断：最多 50K 字符，防大输出撑爆上下文
  */
 public class BashTool extends BaseTool {
     private static final Logger log = LoggerFactory.getLogger(BashTool.class);
@@ -36,8 +37,34 @@ public class BashTool extends BaseTool {
         "dd if=", ":(){ :|:& };:", "chmod 777 /", "> /dev/sda"
     );
 
+    /**
+     * 只读白名单：只有命令以这些前缀开头才允许执行。
+     * 用于 VERIFICATION Agent，防止 LLM 借 bash 做破坏性操作。
+     */
+    private static final List<String> READ_ONLY_WHITELIST = List.of(
+        "java ", "javac ", "mvn validate", "mvn --version", "mvn -v",
+        "gradle --version", "gradle -v",
+        "ls", "dir", "cat ", "head ", "tail ", "find ", "grep ",
+        "echo ", "pwd", "whoami", "uname", "hostname",
+        "git status", "git log", "git diff", "git show", "git branch",
+        "git remote", "git tag",
+        "curl --head", "wget --spider",
+        "ps ", "top -bn1", "df ", "du "
+    );
+
+    /** true = 只读模式，只允许白名单命令（VERIFICATION Agent 使用） */
+    private final boolean readOnly;
+
+    public BashTool() { this(false); }
+
+    public BashTool(boolean readOnly) { this.readOnly = readOnly; }
+
     @Override public String name() { return "bash"; }
-    @Override public String description() { return "执行 shell 命令，返回 stdout+stderr。超时 30 秒自动终止。"; }
+    @Override public String description() {
+        return readOnly
+            ? "执行只读诊断命令（仅限白名单：java/mvn/git-status/ls/cat 等），返回 stdout+stderr。"
+            : "执行 shell 命令，返回 stdout+stderr。超时 30 秒自动终止。";
+    }
 
     /**
      * 执行 Shell 命令。
