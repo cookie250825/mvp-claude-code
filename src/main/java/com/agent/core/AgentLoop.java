@@ -49,6 +49,7 @@ public class AgentLoop {
     private final ContextBuilder ctx;
     private final com.agent.tools.TodoManager todoManager;
     private final BackgroundManager bgManager;
+    private final SubagentManager subagentManager;
     private final ToolExecutionConfirmation confirmation;
 
     /** 0 = 不限轮次（靠 token 预算），>0 = 轮次上限 */
@@ -78,7 +79,8 @@ public class AgentLoop {
      */
     public AgentLoop(AIService ai, ToolDispatcher tools, CompactService compact,
                      ContextBuilder ctx, com.agent.tools.TodoManager todoManager,
-                     BackgroundManager bgManager, ToolExecutionConfirmation confirmation,
+                     BackgroundManager bgManager, SubagentManager subagentManager,
+                     ToolExecutionConfirmation confirmation,
                      int maxRounds, int maxContextTokens, double dangerRatio) {
         this.ai = ai;
         this.tools = tools;
@@ -86,6 +88,7 @@ public class AgentLoop {
         this.ctx = ctx;
         this.todoManager = todoManager;
         this.bgManager = bgManager;
+        this.subagentManager = subagentManager;
         this.confirmation = confirmation;
         this.maxRounds = maxRounds;
         this.maxContextTokens = maxContextTokens;
@@ -121,7 +124,6 @@ public class AgentLoop {
 
         for (int round = 1; ; round++) {
             // ---- 步骤 1: 排空后台任务通知 ----
-            // 如果有后台任务刚完成，把结果注入上下文，LLM 下轮能看到
             if (bgManager != null) {
                 java.util.List<java.util.Map<String, Object>> notifs = bgManager.drain();
                 if (!notifs.isEmpty()) {
@@ -132,6 +134,27 @@ public class AgentLoop {
                     }
                     txt.append("</background-results>");
                     history.add(UserMessage.from(txt.toString()));
+                }
+            }
+
+            // ---- 步骤 1b: 排空子 Agent 结果 ----
+            if (subagentManager != null) {
+                java.util.List<java.util.Map<String, Object>> subNotifs = subagentManager.drain();
+                if (!subNotifs.isEmpty()) {
+                    StringBuilder txt = new StringBuilder("<subagent-results>\n");
+                    for (var n : subNotifs) {
+                        txt.append("子 Agent [").append(n.get("task_id")).append("]")
+                           .append(" (").append(n.get("type")).append(")")
+                           .append(": ").append(n.get("status")).append("\n")
+                           .append(n.get("result")).append("\n");
+                    }
+                    txt.append("</subagent-results>");
+                    history.add(UserMessage.from(txt.toString()));
+                }
+                // 提示父 Agent 有子 Agent 在执行中
+                if (subagentManager.hasRunning()) {
+                    history.add(UserMessage.from("<reminder>有 " + subagentManager.runningCount()
+                        + " 个子 Agent 正在后台执行，请继续当前工作或等待结果。</reminder>"));
                 }
             }
 

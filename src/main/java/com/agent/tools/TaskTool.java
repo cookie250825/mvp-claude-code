@@ -2,6 +2,7 @@ package com.agent.tools;
 
 import com.agent.config.AppConfig;
 import com.agent.core.*;
+import com.agent.memory.MemoryManager;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.langchain4j.agent.tool.ToolSpecification;
@@ -31,12 +32,17 @@ public class TaskTool extends BaseTool {
     private final ToolDispatcher dispatcher;
     private final ToolRegistry registry;
     private final AppConfig config;
+    private final SubagentManager subagentManager;
+    private final MemoryManager memoryManager;
 
-    public TaskTool(AIService ai, ToolDispatcher dispatcher, ToolRegistry registry, AppConfig config) {
+    public TaskTool(AIService ai, ToolDispatcher dispatcher, ToolRegistry registry, AppConfig config,
+                    SubagentManager subagentManager, MemoryManager memoryManager) {
         this.ai = ai;
         this.dispatcher = dispatcher;
         this.registry = registry;
         this.config = config;
+        this.subagentManager = subagentManager;
+        this.memoryManager = memoryManager;
     }
 
     @Override public String name() { return "task"; }
@@ -74,8 +80,9 @@ public class TaskTool extends BaseTool {
             };
 
             log.info("TaskTool spawning subagent type={}", type);
-            String result = SubagentRunner.run(ai, dispatcher, registry, config, prompt, maxRounds, type);
-            return ToolResult.success(result);
+            String id = subagentManager.submit(ai, dispatcher, registry, config, prompt, maxRounds, type, memoryManager);
+            return ToolResult.success("子 Agent [" + id + "] 已启动 (类型: " + type
+                + ", 最大轮次: " + maxRounds + ")。完成后结果自动通知。");
         } catch (Exception e) {
             log.error("TaskTool failed", e);
             return ToolResult.error(e.getMessage());

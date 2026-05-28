@@ -86,8 +86,10 @@ public class ContextBuilder {
             "- file(read/write/list/exists): 文件读写，优先使用\n" +
             "- bash(command): 执行 Shell 命令，包括编译、运行、git 操作\n" +
             "- search(pattern, ext): 搜索文件内容，支持正则和文件类型过滤\n" +
-            "- task(prompt, agent_type, maxRounds): 启动专用子 Agent。\n" +
+            "- task(prompt, agent_type, maxRounds): 启动后台子 Agent，立即返回启动确认，子 Agent 在后台异步执行。\n" +
+            "  可同时启动多个子 Agent 并行工作。完成后结果自动以 <subagent-results> 注入对话。\n" +
             "  agent_type: explore(只读探索) / plan(方案设计) / verification(验证审查) / general(通用,默认)\n" +
+            "  注意: general 子 Agent 跑在独立 git worktree 中，修改不会影响主工作区。\n" +
             "- TodoWrite(items): 任务拆解与进度追踪。严格遵守上述 TodoWrite 使用规范\n\n" +
             "工作目录: " + config.getWorkspace()
         ));

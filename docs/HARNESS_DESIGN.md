@@ -99,20 +99,27 @@
 
 ---
 
-## 7. SubagentRunner — 独立上下文 + 防递归
+## 7. SubagentRunner — 独立上下文 + 防递归 + 记忆注入
 
 **设计决策：** 不是线程隔离，是**上下文隔离**。
 
 ```
 父 Agent: history[...], ToolDispatcher{tool1,tool2,task}
 子 Agent: subHistory[...], ToolDispatcher{tool1,tool2}  ← 没有 task
+                                 + MemoryManager  ← 可读 MEMORY.md
 ```
 
-**为什么不是线程？** 子 Agent 在父 Agent 的线程里同步执行，因为父 Agent 需要子 Agent 的结果才能继续。异步执行是另一种模式（后台任务），不应该和子 Agent 混淆。
+**异步并行：** v1.6 起子 Agent 不再同步阻塞。SubagentManager 线程池管理，task() 调用后立即返回"已启动"，子 Agent 后台执行。完成后结果通过 drain() 自动注入父 Agent 对话。
+
+**GENERAL Worktree 隔离：** GENERAL 类型通过 WorktreeManager 创建独立 git worktree（`git worktree add --detach`），文件系统级别物理隔离。多个 GENERAL 可同时并行，改同一个文件也不互相覆盖。FileTool ThreadLocal workspace 覆写确保文件操作指向正确目录。
+
+**记忆注入（只读）：** 子 Agent 通过 MemoryManager 读取 MEMORY.md 获取项目上下文。只读不写——子 Agent 是一次性工人，记忆应由父 Agent 管理。
 
 **防递归：** `withoutTaskTool()` + `registry.without("task")` —— 子 Agent 的工具列表里没有 task，LLM 不知道有 task 工具就不会调用。这是**在工具定义层面切断**，不是在执行层面拦截。
 
-**采访话术：** "子 Agent 的核心是上下文隔离——独立的 messages[] 和独立的工具集。防递归不是在执行层拦截，而是在工具定义层切断——子 Agent 的工具 spec 列表里根本没有 task。这种设计天然线程安全，因为父子之间不共享任何可变状态。"
+**线程安全：** SubagentRunner 全局部变量、AIService 无状态、ToolDispatcher/Registry 每次 clone、FileTool ThreadLocal——无需任何锁。
+
+**采访话术：** "子 Agent 的核心是上下文隔离——独立的 messages[] 和独立的工具集。防递归不是在执行层拦截，而是在工具定义层切断。v1.6 升级为异步并行 + worktree 文件隔离——只读类型无限制并行，GENERAL 每个跑在独立 git worktree 中。这种设计天然线程安全，因为父子之间不共享任何可变状态。"
 
 ---
 
@@ -194,24 +201,24 @@ ChatRequest = [System Prompt] + [Memory 索引] + [工具声明] + [对话历史
 
 ## 11. SubagentRunner 对齐 — 架构一致性
 
-**设计决策：** SubagentRunner 补齐 microCompact + 错误注入，与 AgentLoop 完全对齐。
+**设计决策：** SubagentRunner 补齐 microCompact + 错误注入 + 记忆注入，通过 SubagentManager 实现异步并行 + worktree 文件隔离。
 
-**补齐前：** SubagentRunner 只有 autoCompact（粗粒度 LLM 摘要），没有 microCompact（细粒度静默裁剪），没有错误注入（一次 API 抖动就中断）。
-
-**补齐后的对齐矩阵：**
+**对齐矩阵：**
 
 | 功能 | AgentLoop | SubagentRunner | 说明 |
 |------|-----------|---------------|------|
-| microCompact | ✅ | ✅ 新增 | 每轮裁剪 >2000 字工具输出 |
-| autoCompact | ✅ | ✅ 已有 | token 超阈值 LLM 摘要 |
-| 错误注入 | ✅ | ✅ 新增 | LLM 异常 → `<error>` 消息继续 |
+| microCompact | ✅ | ✅ | 每轮裁剪 >2000 字工具输出 |
+| autoCompact | ✅ | ✅ | token 超阈值 LLM 摘要 |
+| 错误注入 | ✅ | ✅ | LLM 异常 → `<error>` 消息继续 |
+| Memory 读取 | ✅ | ✅ v1.6 | MEMORY.md 注入子 Agent 上下文 |
 | Tool 确认 | ✅ 交互式 | ✅ 自动批准 | 子 Agent 不二次确认 |
 | Todo nag | ✅ | ❌ 不需要 | 子 Agent 不管理 Todo |
-| 后台任务 | ✅ | ❌ 不需要 | 子 Agent 同步执行 |
+| 后台任务 | ✅ | ❌ 不需要 | 子 Agent 通过 SubagentManager 异步执行 |
+| Worktree 隔离 | ❌ 不需要 | ✅ v1.6 | GENERAL 类型独有 |
 
 **为什么子 Agent 的 Tool 确认是「自动批准」？** 父 Agent 已经决定委托任务给子 Agent，如果子 Agent 的每次工具调用还要再确认一次，用户体验就变成了"俄罗斯套娃式的确认弹窗"。子 Agent 用 `new ToolExecutionConfirmation(false)` —— 非交互模式，所有工具自动批准。
 
-**面试话术：** "子 Agent 和主 Agent 共享同一套循环架构——微裁剪、自动压缩、错误自愈全有。区别只在于子 Agent 不做 Todo 管理和用户确认。这种分层对齐让架构容易理解和维护。"
+**面试话术：** "子 Agent 和主 Agent 共享同一套循环架构——微裁剪、自动压缩、错误自愈全有。v1.6 升级为异步并行——只读类型无限制并行，GENERAL 每个跑在独立 git worktree 中。FileTool ThreadLocal workspace 确保文件操作正确隔离。记忆只读注入让子 Agent 理解项目上下文。"
 
 ---
 
@@ -228,6 +235,8 @@ ChatRequest = [System Prompt] + [Memory 索引] + [工具声明] + [对话历史
 | MemoryManager | 持久化跨会话信息 | 不解释记忆语义 |
 | MCPClient | 连接外部工具生态 | 不定义工具行为 |
 | SubagentRunner | 隔离子任务上下文 | 不调度多 Agent |
+| SubagentManager | 异步调度 + 结果回传 | 不干预子 Agent 决策 |
+| WorktreeManager | 文件系统隔离 | 不管理 Git 分支策略 |
 | CLI | 人机交互入口 | 不做 Agent 能力 |
 
 **核心原则：Harness 造车，Model 开车。车的质量决定了司机能开多远多快，但路线永远是司机自己决定的。**

@@ -34,15 +34,24 @@ public class FileTool extends BaseTool {
     private static final ObjectMapper mapper = new ObjectMapper();
     private static final int MAX_OUTPUT_CHARS = 50000;  // 读文件/列目录的最大输出字符数
     private static Path WORKSPACE;  // 沙箱边界（启动时由 Main.initWorkspace 设置）
+    /** 线程级 workspace 覆写 — 子 Agent 在 worktree 中执行时，只影响当前线程 */
+    private static final ThreadLocal<Path> WORKSPACE_OVERRIDE = new ThreadLocal<>();
 
     /**
      * 设置工作目录边界 — 启动时由 Main.java 调用一次。
-     * 之后所有文件操作都被限制在这个目录内。
-     *
-     * @param workspacePath 工作目录绝对路径
      */
     public static void initWorkspace(String workspacePath) {
         WORKSPACE = Path.of(workspacePath).toAbsolutePath().normalize();
+    }
+
+    /** 为当前线程设置 workspace 覆写（子 Agent 在 worktree 中执行前调用） */
+    public static void setWorkspaceOverride(String path) {
+        WORKSPACE_OVERRIDE.set(Path.of(path).toAbsolutePath().normalize());
+    }
+
+    /** 清除当前线程的 workspace 覆写（子 Agent 执行完毕后调用） */
+    public static void clearWorkspaceOverride() {
+        WORKSPACE_OVERRIDE.remove();
     }
 
     @Override public String name() { return "file"; }
@@ -113,9 +122,11 @@ public class FileTool extends BaseTool {
      * @throws SecurityException 如果路径越界
      */
     private Path safePath(String raw) {
-        Path resolved = WORKSPACE.resolve(resolvePath(raw)).toAbsolutePath().normalize();
-        if (!resolved.startsWith(WORKSPACE)) {
-            throw new SecurityException("路径越界: " + raw + " (工作目录: " + WORKSPACE + ")");
+        Path workspace = WORKSPACE_OVERRIDE.get();
+        if (workspace == null) workspace = WORKSPACE;
+        Path resolved = workspace.resolve(resolvePath(raw)).toAbsolutePath().normalize();
+        if (!resolved.startsWith(workspace)) {
+            throw new SecurityException("路径越界: " + raw + " (工作目录: " + workspace + ")");
         }
         return resolved;
     }

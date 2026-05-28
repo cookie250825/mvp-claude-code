@@ -1,5 +1,38 @@
 # Changelog
 
+## v1.6.0 — SubAgent 异步并行 + Worktree 文件隔离 (2026-05-28)
+
+### 新增
+- **SubagentManager** — 异步子 Agent 管理器。4 线程固定池，`submit()` 提交后立即返回任务 ID，子 Agent 在后台执行。AgentLoop 每轮 `drain()` 已完成结果自动注入 `<subagent-results>`。父 Agent 不再阻塞等待子 Agent
+- **WorktreeManager** — Git worktree 管理器。`create()` 调用 `git worktree add --detach` 创建临时项目副本，`getDiff()` 获取修改内容，`remove()` 清理。每个 GENERAL 子 Agent 获得独立文件系统副本
+- **GENERAL Worktree 隔离** — 多个 GENERAL 子 Agent 可同时并行执行，各自操作独立 worktree，改同一个文件也不互相覆盖。完成后 git diff 附加到结果中，父 Agent 决定是否合入
+- **只读子 Agent 无限制并行** — Explore/Plan/Verification 纯读操作，不存在冲突，可任意数量并行
+- **SubAgent 记忆注入** — 子 Agent 通过 MemoryManager 读取 MEMORY.md 获取项目上下文（只读不写）。SubagentRunner → SubagentManager → TaskTool 全链路传递 MemoryManager
+
+### 增强
+- **FileTool ThreadLocal workspace** — 新增 `setWorkspaceOverride()`/`clearWorkspaceOverride()`，支持线程级 workspace 覆写。子 Agent 在 worktree 中执行时文件操作自动指向正确目录
+- **AppConfig.withWorkspace()** — 创建 workspace 路径不同的配置副本，子 Agent 在 worktree 中获取正确的项目路径
+- **System Prompt 更新** — 说明 task 工具异步行为 + GENERAL worktree 隔离 + 子 Agent 记忆可读
+
+### 架构
+- **并行策略** — Explore/Plan/Verification 无限制并行（纯读）。GENERAL 并行 + worktree 隔离（可写不冲突）
+- **线程安全** — SubagentRunner 全局部变量、AIService 无状态、ToolDispatcher/Registry 每次 clone、FileTool ThreadLocal、ConcurrentHashMap/Queue。无需任何锁
+
+### 新增文件
+- `core/SubagentManager.java` — 异步子 Agent 管理器
+- `core/WorktreeManager.java` — Git worktree 管理器
+
+### 修改文件
+- `core/SubagentRunner.java` — run() 新增 MemoryManager 参数，ContextBuilder 不再传 null
+- `core/AgentLoop.java` — 新增 SubagentManager 字段 + drain 逻辑 + 运行中提醒
+- `core/ContextBuilder.java` — System Prompt 更新异步 task 说明
+- `tools/TaskTool.java` — 改用 SubagentManager.submit() 异步提交，新增 MemoryManager
+- `tools/FileTool.java` — 新增 ThreadLocal workspace 覆写
+- `config/AppConfig.java` — 新增 withWorkspace() 方法
+- `Main.java` — 装配 WorktreeManager + SubagentManager，传 MemoryManager 给 TaskTool
+
+---
+
 ## v1.5.2 — SubAgent 安全加固 + 容错增强 (2026-05-28)
 
 ### 安全修复

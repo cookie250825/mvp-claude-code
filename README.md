@@ -17,7 +17,7 @@ flowchart TD
     C -->|交互模式 -i| D[AgentLoop.process]
     C -->|单次模式 -p| D
 
-    D --> D2[BackgroundManager.drain\n后台任务通知注入]
+    D --> D2[BackgroundManager.drain + SubagentManager.drain\n后台任务通知注入 + 子Agent结果注入]
     D2 --> D3[microCompact\n旧工具输出裁剪]
     D3 --> D4{token > 阈值?}
     D4 -->|是 autoCompact| D5[LLM 摘要压缩]
@@ -44,7 +44,7 @@ flowchart TD
     K -->|file| L[FileTool\n读写/列目录]
     K -->|bash| M[BashTool\nShell 命令 30s超时]
     K -->|search| N[SearchTool\n文本搜索]
-    K -->|task| O[TaskTool → SubagentRunner\n独立上下文 + microCompact\n+ 错误注入 + 防递归]
+    K -->|task| O[TaskTool → SubagentManager\n异步提交 + 线程池并行\n+ WorktreeManager 文件隔离\n+ MemoryManager 记忆注入]
     K -->|TodoWrite| P[TodoWriteTool\nTodo 状态管理]
     K -->|MCP 工具| Q[MCPClient\nJSON-RPC over stdio\n外部 MCP Server]
 
@@ -93,7 +93,11 @@ flowchart TD
 - **工具崩溃保护** — `catch(Throwable)` 兜底 OOM 等 Error，写 `[tool crash]` 进 history 让 LLM 换路，进程不崩
 - **压缩失败降级** — LLM 摘要失败时不丢旧消息，退化为纯裁剪（保留后一半）；连续 3 次失败放弃压缩等熔断接手（对标 Claude Code）
 - **四种 SubAgent 类型** — Explore（只读探索）/ Plan（方案设计）/ Verification（验证审查）/ General（通用），对标 Claude Code
+- **SubAgent 异步并行** — SubagentManager 线程池 + 通知队列，只读类型（Explore/Plan/Verification）无限制并行，父 Agent 不阻塞
+- **GENERAL Worktree 隔离** — WorktreeManager 为每个 GENERAL 子 Agent 创建独立 git worktree，文件系统级别物理隔离，多个可同时跑不冲突
+- **SubAgent 记忆注入** — 子 Agent 可读取 MEMORY.md 获取项目上下文，只读不写
 - **SubAgent 双层安全** — 第一道物理隔离（工具不在 Dispatch Map 里就调不了），第二道 Prompt 否定指令（NEVER/FORBIDDEN），Prompt 失效 ≠ 安全失效
+- **FileTool ThreadLocal 隔离** — 支持线程级 workspace 覆写，子 Agent 在 worktree 中执行时文件操作自动指向正确目录
 - **BashTool 只读白名单模式** — `new BashTool(true)` 只允许诊断类命令（java/mvn/git-status/ls/cat 等），VERIFICATION Agent 专用，第一道防线真正拦住破坏性写操作
 - **SubAgent 容错增强** — 连续 LLM 失败超阈值（3次）提前退出并返回部分结果；最大轮次耗尽时保留已有中间输出而非丢弃；LLM 失败指数退避（1s→2s→4s）
 - **工具执行确认** — 交互模式 y/n/a 三级确认，用户否决写回 history 让 LLM 调整策略
@@ -122,6 +126,8 @@ mvp-claude-code/
 │   │   ├── CompactService.java         # 三层上下文压缩
 │   │   ├── ContextBuilder.java         # ChatRequest 拼装 + Prompt Caching 前缀分离
 │   │   ├── SubagentRunner.java         # 四种 SubAgent + 双层安全保障
+│   │   ├── SubagentManager.java        # 异步子Agent管理（线程池 + Worktree + 通知队列）
+│   │   ├── WorktreeManager.java        # Git worktree 管理（创建/清理/diff）
 │   │   ├── ToolDispatcher.java         # Dispatch Map（黑名单/白名单过滤）
 │   │   └── ToolExecutionConfirmation.java  # 工具执行确认（y/n/a 三级）
 │   │
@@ -235,16 +241,24 @@ toolSpecifications:
 2. **会变的东西放动态层**：工具名列表 + Memory 每次从 ToolRegistry/MemoryManager 实时拿——MCP 中途增删工具、Agent 存新记忆立刻反映
 3. **Schema 不占文本空间**：走 `toolSpecifications` 参数，跟 messages 隔离，DeepSeek 单独缓存
 
-**SubagentRunner.java** — 四种专用子 Agent + 双层安全
+**SubagentRunner.java** — 四种专用子 Agent + 双层安全 + 记忆注入
 
-四种类型对标 Claude Code 泄露架构。第一道防线：物理隔离（工具不在 Dispatch Map 里就调不了）；第二道防线：Prompt 否定指令（NEVER/FORBIDDEN）。Prompt 失效 ≠ 安全失效。
+四种类型对标 Claude Code 泄露架构。第一道防线：物理隔离（工具不在 Dispatch Map 里就调不了）；第二道防线：Prompt 否定指令（NEVER/FORBIDDEN）。Prompt 失效 ≠ 安全失效。子 Agent 可读取 MEMORY.md（只读不写），获取项目上下文。
 
-| 类型 | 可用工具 | 移除 | 防线模式 |
-|------|---------|------|---------|
-| EXPLORE | file, search | bash, write, task, TodoWrite | 黑名单 |
-| PLAN | file, search | 其他全部 | **白名单（最严）** |
-| VERIFICATION | file, search, bash | write, task, TodoWrite | 黑名单 |
-| GENERAL | 除 task 外全有 | task | 黑名单 |
+| 类型 | 可用工具 | 移除 | 防线模式 | 记忆 |
+|------|---------|------|---------|------|
+| EXPLORE | file, search | bash, write, task, TodoWrite | 黑名单 | 可读 |
+| PLAN | file, search | 其他全部 | **白名单（最严）** | 可读 |
+| VERIFICATION | file, search, bash | write, task, TodoWrite | 黑名单 | 可读 |
+| GENERAL | 除 task 外全有 | task | 黑名单 | 可读 |
+
+**SubagentManager.java** — 异步子 Agent 管理器
+
+4 线程固定池，`submit()` 提交后立刻返回任务 ID。只读类型（Explore/Plan/Verification）无限制并行。GENERAL 类型通过 WorktreeManager 创建独立 git worktree，文件系统级别物理隔离。完成后 `drain()` 把结果注入父 Agent 对话。FileTool ThreadLocal workspace 覆写确保子 Agent 文件操作指向正确目录。
+
+**WorktreeManager.java** — Git worktree 管理器
+
+`create()` 调用 `git worktree add --detach` 创建临时项目副本，`getDiff()` 获取子 Agent 修改内容，`remove()` 清理。为每个 GENERAL 子 Agent 提供文件系统级隔离。
 
 **ToolDispatcher.java** — Dispatch Map
 
@@ -262,7 +276,7 @@ toolSpecifications:
 
 **SearchTool** — 文本搜索，支持 pattern + ext 过滤，最多 50 条结果
 
-**TaskTool** — 子任务委托，调用 SubagentRunner。参数：prompt + agent_type(explore/plan/verification/general) + maxRounds。LLM 按需选择 Agent 类型，每种有不同的安全边界
+**TaskTool** — 子任务委托，异步提交到 SubagentManager 线程池。参数：prompt + agent_type(explore/plan/verification/general) + maxRounds。调用后立即返回"已启动"，子 Agent 后台执行，完成后结果通过 drain 自动注入对话
 
 **BackgroundRunTool** — 启动后台任务，立即返回任务 ID，不阻塞 Agent 循环。适用于编译等耗时操作
 
@@ -495,6 +509,19 @@ learn-claude-code 也是三层（micro/auto/manual），但每层的策略和我
 - **双层安全：** 第一道物理隔离（工具不在 Dispatch Map 里就调不了）；第二道 Prompt 否定指令（NEVER/FORBIDDEN）。Prompt 失效 ≠ 安全失效——第一道防线不依赖 LLM 听话。
 - **防递归：** 所有类型都物理移除 task 工具——在能力层截断，不是执行层拦截。
 
+### SubagentManager：异步并行 + Worktree 隔离（对标 Claude Code）
+
+| 项目 | 做法 |
+|------|------|
+| learn-claude-code | 子 Agent 异步并行执行，同一轮可启动多个 |
+| **我们** | **SubagentManager 线程池 + WorktreeManager 文件隔离** |
+
+- **异步非阻塞：** task() 调用后立即返回"已启动"，子 Agent 在后台线程执行。父 Agent 不受阻塞，可继续工作或启动更多子 Agent。完成后结果通过 drain() 自动注入。
+- **只读并行：** Explore/Plan/Verification 无限制并行——纯读操作不存在冲突。
+- **GENERAL Worktree 隔离：** 每个 GENERAL 子 Agent 获得独立的 `git worktree add --detach` 临时副本。改同一个文件也不互相覆盖。完成后 git diff 附加到结果中，父 Agent 决定是否合入。
+- **线程安全：** SubagentRunner 全局部变量、AIService 无状态、ToolDispatcher/Registry 每次 clone、FileTool ThreadLocal workspace 覆写——无需任何锁。
+- **记忆注入：** 子 Agent 通过 MemoryManager 读取 MEMORY.md，获取项目上下文。只读不写——子 Agent 是一次性工人。
+
 ---
 
 ### 与 learn-claude-code 的核心差异总结
@@ -514,6 +541,7 @@ learn-claude-code 也是三层（micro/auto/manual），但每层的策略和我
 | 并行工具执行 | ❌ | **✅ CompletableFuture 线程池** | 减少 API 调用轮次 |
 | Prompt Caching | ❌ | **✅ 前缀分离架构** | 结构自带缓存，面试加分 |
 | SubAgent 类型 | 1 种（Explore） | **✅ 4 种（Explore/Plan/Verification/General）** | 对标 Claude Code 泄露架构 |
+| SubAgent 并发 | ❌ 同步 | **✅ 异步并行 + Worktree 隔离** | 对标 Claude Code 子Agent |
 | SubAgent 安全 | 工具层去 task | **✅ 双层（物理隔离 + Prompt NEVER）** | Prompt 失效 ≠ 安全失效 |
 | 会话管理 | ❌（无持久化会话） | ❌ | MVP 阶段不需要 |
 
@@ -525,7 +553,9 @@ learn-claude-code 也是三层（micro/auto/manual），但每层的策略和我
 - 想理解 **上下文压缩怎么做** → 看 `core/CompactService.java`（110 行）
 - 想理解 **Prompt Caching 怎么架构化** → 看 `core/ContextBuilder.java`（105 行）
 - 想理解 **AI 记忆系统怎么设计** → 看 `memory/MemoryManager.java`（100 行）
+- 想理解 **子 Agent 怎么异步并行** → 看 `core/SubagentManager.java`（130 行）
 - 想理解 **子 Agent 怎么隔离** → 看 `core/SubagentRunner.java`（85 行）
+- 想理解 **Git worktree 怎么用于 Agent** → 看 `core/WorktreeManager.java`（70 行）
 - 想理解 **工具确认怎么实现** → 看 `core/ToolExecutionConfirmation.java`（50 行）
 - 想理解 **完整设计哲学** → 看 `docs/HARNESS_DESIGN.md`（11 章）
 

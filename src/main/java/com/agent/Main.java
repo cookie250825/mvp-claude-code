@@ -126,8 +126,12 @@ public class Main implements Callable<Integer> {
         registry.register(todoWrite);
         dispatcher.register(todoWrite);
 
-        // 子任务委托（依赖 AIService + ToolDispatcher + ToolRegistry + AppConfig）
-        TaskTool taskTool = new TaskTool(ai, dispatcher, registry, config);
+        // Worktree + Subagent 管理（异步并行子 Agent）
+        WorktreeManager worktreeManager = new WorktreeManager();
+        SubagentManager subagentManager = new SubagentManager(worktreeManager);
+
+        // 子任务委托（异步模式：task() 立即返回，子 Agent 后台执行）
+        TaskTool taskTool = new TaskTool(ai, dispatcher, registry, config, subagentManager, memory);
         registry.register(taskTool);
         dispatcher.register(taskTool);
 
@@ -139,7 +143,8 @@ public class Main implements Callable<Integer> {
         CompactService compact = new CompactService(ai, config.getCompactThreshold());
         ContextBuilder ctxBuilder = new ContextBuilder(registry, memory, config);
         AgentLoop loop = new AgentLoop(ai, dispatcher, compact, ctxBuilder, todoManager, bgManager,
-            confirmation, config.getMaxRounds(), config.getMaxContextTokens(), config.getContextDangerRatio());
+            subagentManager, confirmation,
+            config.getMaxRounds(), config.getMaxContextTokens(), config.getContextDangerRatio());
         loop.init();
 
         // ---- 步骤 10: 运行 ----

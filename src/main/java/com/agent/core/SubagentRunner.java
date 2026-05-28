@@ -1,6 +1,7 @@
 package com.agent.core;
 
 import com.agent.config.AppConfig;
+import com.agent.memory.MemoryManager;
 import com.agent.tools.ToolRegistry;
 import dev.langchain4j.data.message.*;
 import dev.langchain4j.model.chat.response.ChatResponse;
@@ -69,7 +70,8 @@ public class SubagentRunner {
      */
     public static String run(AIService ai, ToolDispatcher dispatcher,
                               ToolRegistry registry, AppConfig config,
-                              String prompt, int maxRounds, SubagentType type) {
+                              String prompt, int maxRounds, SubagentType type,
+                              MemoryManager memoryManager) {
         log.info("Subagent[{}] start, maxRounds={}, prompt={}", type, maxRounds,
                  prompt.substring(0, Math.min(80, prompt.length())));
 
@@ -144,7 +146,7 @@ public class SubagentRunner {
         subHistory.add(SystemMessage.from(systemPrompt));
         subHistory.add(UserMessage.from(prompt));
 
-        ContextBuilder subCtx = new ContextBuilder(subRegistry, null, config);
+        ContextBuilder subCtx = new ContextBuilder(subRegistry, memoryManager, config);
         CompactService subCompact = new CompactService(ai, config.getCompactThreshold());
         // 子 Agent 工具自动批准（父 Agent 已授权）
         ToolExecutionConfirmation subConfirm = new ToolExecutionConfirmation(false);

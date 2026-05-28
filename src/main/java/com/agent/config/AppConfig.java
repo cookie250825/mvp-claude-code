@@ -32,14 +32,30 @@ public class AppConfig {
 
     /** SnakeYAML 解析后的原始 Map。所有值从这里通过路径取值。 */
     private final Map<String, Object> raw;
+    private final String workspaceOverride;
 
     /**
      * @param configPath 配置文件路径（可为 null，fallback 到 classpath）
      */
     @SuppressWarnings("unchecked")
     public AppConfig(String configPath) {
+        this(configPath, null);
+    }
+
+    /** 内部构造器：支持 workspace 覆写（用于子 Agent worktree 隔离） */
+    @SuppressWarnings("unchecked")
+    private AppConfig(String configPath, String workspaceOverride) {
         Map<String, Object> result = loadFromFile(configPath);
-        this.raw = result != null ? result : Map.of();
+        this.raw = result != null ? result : new java.util.HashMap<>();
+        this.workspaceOverride = workspaceOverride;
+    }
+
+    /** 创建一个 workspace 路径不同的副本（用于子 Agent 在 worktree 中执行） */
+    public AppConfig withWorkspace(String newWorkspace) {
+        // 直接复用已解析的 raw Map，只改 workspace
+        AppConfig copy = new AppConfig(null, newWorkspace);
+        copy.raw.putAll(this.raw);
+        return copy;
     }
 
     /**
@@ -152,8 +168,8 @@ public class AppConfig {
     }
 
     public String getProjectName() { return "mini-claude"; }
-    /** 当前工作目录（项目根目录） */
-    public String getWorkspace()   { return System.getProperty("user.dir"); }
+    /** 当前工作目录（项目根目录）。子 Agent 在 worktree 中执行时会返回 worktree 路径。 */
+    public String getWorkspace()   { return workspaceOverride != null ? workspaceOverride : System.getProperty("user.dir"); }
 
     // ---- Security ----
     /** 安全沙箱边界：留空=当前目录；填绝对路径=限制文件操作范围 */
