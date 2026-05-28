@@ -1,5 +1,22 @@
 # Changelog
 
+## v1.6.1 — MemoryManager 重构：MemoryItem 驱动 (2026-05-28)
+
+### 重构
+- **MemoryManager 真正使用 MemoryItem** — 之前 MemoryItem 定义了 name/type/description/fileName 四个字段和 toString()，但 MemoryManager 全程用原始字符串拼凑，MemoryItem 从未实例化。现在改为解析式架构：
+  - `parseIndex()` — 正则解析 MEMORY.md 每行 `- [name](file.md) — desc` → `List<MemoryItem>`
+  - `writeIndex(List<MemoryItem>)` — 每个 `item.toString()` 序列化回写
+  - `save()` — `new MemoryItem()` → parse → removeIf 匹配 fileName → add → write
+  - `delete()` — parse → removeIf 匹配 fileName → write
+  - `getFileName()` 终于在 `removeIf(i.getFileName().equals(...))` 中被使用
+- **消除重复枚举** — `MemoryManager.MemoryType` 删除，统一使用 `MemoryItem.MemoryType`
+- **删除 `appendIndex()`** — 被 parse→modify→write 模式替代，按文件名匹配更新取代按正则替换
+
+### 修改文件
+- `memory/MemoryManager.java` — 重写为 MemoryItem 驱动的解析式架构
+
+---
+
 ## v1.6.0 — SubAgent 异步并行 + Worktree 文件隔离 (2026-05-28)
 
 ### 新增

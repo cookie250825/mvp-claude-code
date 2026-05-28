@@ -5,6 +5,7 @@ import org.slf4j.LoggerFactory;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Comparator;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -62,16 +63,28 @@ public class WorktreeManager {
     }
 
     /**
-     * 删除 worktree 并清理目录。
+     * 删除 worktree 并递归清理物理目录。
+     * 先 git worktree remove（清理 git 元数据），
+     * 再 Files.walk 逆序删除残留文件（如编译产物 target/）。
      */
     public void remove(String path) {
         try {
             Path wt = Path.of(path);
+            // 第一步：git 清理元数据
             new ProcessBuilder("git", "worktree", "remove", wt.toString(), "--force")
                 .redirectErrorStream(true)
                 .start()
                 .waitFor(10, TimeUnit.SECONDS);
             worktrees.remove(wt);
+
+            // 第二步：递归删除物理残留（未被 git 跟踪的文件）
+            if (Files.exists(wt)) {
+                Files.walk(wt)
+                    .sorted(Comparator.reverseOrder())  // 先删文件再删目录
+                    .forEach(f -> {
+                        try { Files.delete(f); } catch (Exception ignored) {}
+                    });
+            }
             log.info("Worktree removed: {}", wt);
         } catch (Exception e) {
             log.warn("Worktree removal failed for {}: {}", path, e.getMessage());
@@ -84,7 +97,7 @@ public class WorktreeManager {
      */
     public String getDiff(String path) {
         try {
-            ProcessBuilder pb = new ProcessBuilder("git", "-C", path, "diff");
+            ProcessBuilder pb = new ProcessBuilder("git", "-C", path, "diff");//获得Agent 相对于它初始状态的所有修改。
             pb.redirectErrorStream(true);
             Process p = pb.start();
             p.waitFor(10, TimeUnit.SECONDS);

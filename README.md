@@ -298,7 +298,9 @@ toolSpecifications:
 
 ### `memory/` — 记忆系统
 
-**MemoryManager.java** — `~/.agent/memory/` 目录下管理 MEMORY.md 索引 + 四种类型文件（user/feedback/project/reference）。索引全量注入 System Prompt，具体文件按需加载。
+**MemoryManager.java** — `~/.agent/memory/` 目录下管理 MEMORY.md 索引 + 四种类型文件（user/feedback/project/reference）。parseIndex() 正则解析索引 → `List<MemoryItem>`，记忆操作走"parse → modify → write"模式。索引全量注入 System Prompt，具体文件按需加载。
+
+**MemoryItem.java** — 记忆项 DTO，name/type/description/fileName 四个字段 + toString() 序列化为索引行。MemoryManager 内部全程用 MemoryItem 对象操作，不再手动拼字符串。
 
 ### `config/` — 配置管理
 
@@ -552,7 +554,7 @@ learn-claude-code 也是三层（micro/auto/manual），但每层的策略和我
 - 想理解 **MCP 协议怎么实现** → 看 `tools/mcp/MCPClient.java`（150 行）
 - 想理解 **上下文压缩怎么做** → 看 `core/CompactService.java`（110 行）
 - 想理解 **Prompt Caching 怎么架构化** → 看 `core/ContextBuilder.java`（105 行）
-- 想理解 **AI 记忆系统怎么设计** → 看 `memory/MemoryManager.java`（100 行）
+- 想理解 **AI 记忆系统怎么设计** → 看 `memory/MemoryManager.java`（140 行）+ `MemoryItem.java`（46 行）
 - 想理解 **子 Agent 怎么异步并行** → 看 `core/SubagentManager.java`（130 行）
 - 想理解 **子 Agent 怎么隔离** → 看 `core/SubagentRunner.java`（85 行）
 - 想理解 **Git worktree 怎么用于 Agent** → 看 `core/WorktreeManager.java`（70 行）

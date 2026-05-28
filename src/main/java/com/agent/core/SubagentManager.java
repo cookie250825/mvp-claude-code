@@ -70,11 +70,23 @@ public class SubagentManager {
                 // GENERAL 类型：创建 worktree 做文件系统隔离
                 if (type == SubagentRunner.SubagentType.GENERAL && worktreeManager != null) {
                     worktreePath = worktreeManager.create();
-                    if (worktreePath != null) {
-                        FileTool.setWorkspaceOverride(worktreePath);
-                        subConfig = config.withWorkspace(worktreePath);
-                        log.info("Subagent[{}] running in worktree: {}", id, worktreePath);
+                    if (worktreePath == null) {
+                        // worktree 创建失败 → 不降级到主 workspace，直接报错
+                        Map<String, Object> notif = new LinkedHashMap<>();
+                        notif.put("task_id", id);
+                        notif.put("status", "error");
+                        notif.put("type", type.name());
+                        notif.put("result", "GENERAL 子 Agent 启动失败: git worktree 创建不成功。"
+                            + "请检查是否是 git 仓库、工作区是否干净（无未提交的修改）。"
+                            + "可尝试先用 EXPLORE 类型做只读分析。");
+                        notifications.add(notif);
+                        runningTasks.remove(id);
+                        pendingCount.decrementAndGet();
+                        return;
                     }
+                    FileTool.setWorkspaceOverride(worktreePath);
+                    subConfig = config.withWorkspace(worktreePath);
+                    log.info("Subagent[{}] running in worktree: {}", id, worktreePath);
                 }
 
                 String result = SubagentRunner.run(ai, dispatcher, registry, subConfig,
