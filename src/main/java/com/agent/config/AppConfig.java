@@ -112,7 +112,6 @@ public class AppConfig {
     }
 
     // ---- Model 配置 ----
-    public String getProvider()     { return str("model", "provider", "deepseek"); }
     public String getModelName()    { return str("model", "name", "deepseek-chat"); }
     public String getBaseUrl()      { return str("model", "baseUrl", "https://api.deepseek.com/v1"); }
     public String getApiKey()       { return envOr(str("model", "apiKey", "")); }  // 敏感值：环境变量插值
@@ -167,7 +166,6 @@ public class AppConfig {
         return result;
     }
 
-    public String getProjectName() { return "mini-claude"; }
     /** 当前工作目录（项目根目录）。子 Agent 在 worktree 中执行时会返回 worktree 路径。 */
     public String getWorkspace()   { return workspaceOverride != null ? workspaceOverride : System.getProperty("user.dir"); }
 

@@ -195,10 +195,4 @@ public class MCPClient {
         return "{}";
     }
 
-    /** 断开连接 — 关闭流，杀进程 */
-    public void disconnect() {
-        try { if (writer != null) writer.close(); } catch (Exception ignored) {}
-        try { if (reader != null) reader.close(); } catch (Exception ignored) {}
-        if (process != null) process.destroyForcibly();
-    }
 }

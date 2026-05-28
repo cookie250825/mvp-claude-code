@@ -34,7 +34,7 @@ public class BackgroundManager {
     /**
      * 后台任务 — 记录一个正在运行的异步命令。
      */
-    public static class Task {
+    private static class Task {
         /** 任务唯一 ID（UUID 前 8 位） */
         public final String id;
         /** 状态：running / completed / error */
@@ -52,9 +52,9 @@ public class BackgroundManager {
     }
 
     /** 任务 ID → 任务对象（线程安全） */
-    public final Map<String, Task> tasks = new ConcurrentHashMap<>();
+    private final Map<String, Task> tasks = new ConcurrentHashMap<>();
     /** 通知队列：后台线程往里面放完成通知，主循环 drain() 取走 */
-    public final Queue<Map<String, Object>> notifications = new ConcurrentLinkedQueue<>();
+    private final Queue<Map<String, Object>> notifications = new ConcurrentLinkedQueue<>();
 
     /**
      * 启动一个后台任务。

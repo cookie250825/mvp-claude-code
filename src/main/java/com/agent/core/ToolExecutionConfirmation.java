@@ -81,12 +81,4 @@ public class ToolExecutionConfirmation {
         }
     }
 
-    /**
-     * 当前是否处于全自动批准状态。
-     *
-     * @return true = 已全自动（非交互模式或用户选了 a）
-     */
-    public boolean isAutoApprove() {
-        return autoApproveAll || !interactive;
-    }
 }

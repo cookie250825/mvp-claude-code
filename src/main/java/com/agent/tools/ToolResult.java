@@ -32,7 +32,4 @@ public class ToolResult {
 
     public boolean isSuccess() { return success; }
     public String getContent() { return content; }
-
-    @Override
-    public String toString() { return content; }
 }

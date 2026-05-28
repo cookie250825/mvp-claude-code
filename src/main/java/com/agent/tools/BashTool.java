@@ -96,6 +96,21 @@ public class BashTool extends BaseTool {
                 }
             }
 
+            // 只读模式白名单检查（VERIFICATION Agent 专用）
+            if (readOnly) {
+                boolean allowed = false;
+                for (String prefix : READ_ONLY_WHITELIST) {
+                    if (command.startsWith(prefix)) {
+                        allowed = true;
+                        break;
+                    }
+                }
+                if (!allowed) {
+                    return ToolResult.error("只读模式: 命令 '" + command
+                        + "' 不在白名单中。仅允许诊断类命令（java/mvn/ls/cat/git-status 等）。");
+                }
+            }
+
             // 起子进程
             ProcessBuilder pb = new ProcessBuilder("bash", "-c", command);
             pb.redirectErrorStream(true);  // stderr 合并到 stdout

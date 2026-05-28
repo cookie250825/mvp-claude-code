@@ -1,5 +1,22 @@
 # Changelog
 
+## v1.6.2 — 死代码清理 + CLAUDE.md 支持 (2026-05-28)
+
+### 新增
+- **CLAUDE.md 全局注入** — ContextBuilder 启动时读取项目根目录 `CLAUDE.md`，全量注入 System Prompt 最前面。如果文件不存在则静默跳过。对标 Claude Code 的产品行为，用于存放项目架构、编码规范、构建命令等全局指令
+
+### 修复
+- **BashTool 只读白名单生效** — `READ_ONLY_WHITELIST` 之前定义但 execute() 从未检查，`readOnly=true` 路径为死代码。现 `execute()` 中新增白名单校验逻辑，VERIFICATION Agent 的 bash 真正受限
+- **删除 AIService.summarize()** — 与 CompactService 私有 summarize() 功能重复，无人调用
+- **删除 AppConfig.getProvider()/getProjectName()** — 两个 getter 无人调用
+- **删除 ToolResult.toString()** — 未被使用，所有消费方均通过 getContent() 取值
+- **删除 ToolExecutionConfirmation.isAutoApprove()** — 未被外部调用
+- **删除 MCPClient.disconnect()** — 未被调用，资源清理由 JVM 退出完成
+- **BackgroundManager 可见性修正** — Task 内部类/tasks/notifications 从 public 降为 private
+- **Main.java** — 移除未使用的 import java.util.Map
+
+---
+
 ## v1.6.1 — MemoryManager 重构：MemoryItem 驱动 (2026-05-28)
 
 ### 重构

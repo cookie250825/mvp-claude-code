@@ -140,22 +140,4 @@ public class AIService {
 
         return future;
     }
-
-    /**
-     * 摘要生成 — 把一堆消息压缩成一段总结。
-     * 用于 CompactService 的 Auto 和 Manual 层压缩。
-     *
-     * @param messages 需要被摘要的消息列表
-     * @return 一段简洁的摘要文本
-     */
-    public String summarize(List<ChatMessage> messages) {
-        StringBuilder sb = new StringBuilder("请将以下对话历史压缩为简洁摘要，保留关键信息：\n\n");
-        for (ChatMessage msg : messages) {
-            sb.append(msg.type()).append(": ").append(msg.toString()).append("\n");
-        }
-        ChatRequest req = ChatRequest.builder()
-            .messages(UserMessage.from(sb.toString()))
-            .build();
-        return model.chat(req).aiMessage().text();
-    }
 }

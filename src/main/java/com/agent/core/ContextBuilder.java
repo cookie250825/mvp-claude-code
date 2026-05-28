@@ -9,6 +9,8 @@ import dev.langchain4j.model.chat.request.ChatRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -66,6 +68,12 @@ public class ContextBuilder {
     private List<ChatMessage> buildPrefix() {
         List<ChatMessage> prefix = new ArrayList<>();
 
+        // 槽位 0: CLAUDE.md（项目根目录，可选，注入到 System Prompt 之前）
+        String claudeMd = loadClaudeMd();
+        if (!claudeMd.isEmpty()) {
+            prefix.add(SystemMessage.from(claudeMd));
+        }
+
         // 槽位 1: System Prompt
         // 内容完全固定，是缓存命中率最高的部分
         prefix.add(SystemMessage.from(
@@ -95,6 +103,21 @@ public class ContextBuilder {
         ));
 
         return prefix;
+    }
+
+    /** 加载项目根目录的 CLAUDE.md（如果存在），注入到 System Prompt 最前面 */
+    private String loadClaudeMd() {
+        try {
+            Path path = Path.of(config.getWorkspace(), "CLAUDE.md");
+            if (Files.exists(path)) {
+                String content = Files.readString(path);
+                log.info("Loaded CLAUDE.md ({} chars)", content.length());
+                return content;
+            }
+        } catch (Exception e) {
+            log.warn("Failed to load CLAUDE.md: {}", e.getMessage());
+        }
+        return "";
     }
 
     /**
