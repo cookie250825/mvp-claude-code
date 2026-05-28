@@ -37,6 +37,8 @@ public class SubagentManager {
     private final ConcurrentHashMap<String, Future<?>> runningTasks = new ConcurrentHashMap<>();
     private final ConcurrentLinkedQueue<Map<String, Object>> notifications = new ConcurrentLinkedQueue<>();
     private final WorktreeManager worktreeManager;
+    /** 已提交但未完成的总数（含排队中 + 执行中） */
+    private final java.util.concurrent.atomic.AtomicInteger pendingCount = new java.util.concurrent.atomic.AtomicInteger(0);
 
     public SubagentManager(WorktreeManager worktreeManager) {
         this.worktreeManager = worktreeManager;
@@ -59,6 +61,7 @@ public class SubagentManager {
                          String prompt, int maxRounds, SubagentRunner.SubagentType type,
                          MemoryManager memoryManager) {
         String id = UUID.randomUUID().toString().substring(0, 8);
+        pendingCount.incrementAndGet();
 
         Future<?> future = pool.submit(() -> {
             String worktreePath = null;
@@ -106,6 +109,7 @@ public class SubagentManager {
                     if (worktreeManager != null) worktreeManager.remove(worktreePath);
                 }
                 runningTasks.remove(id);
+                pendingCount.decrementAndGet();
             }
         });
 
@@ -125,14 +129,14 @@ public class SubagentManager {
         return out;
     }
 
-    /** 是否有正在运行的子 Agent */
+    /** 是否有待完成的子 Agent（含排队中 + 执行中） */
     public boolean hasRunning() {
-        return !runningTasks.isEmpty();
+        return pendingCount.get() > 0;
     }
 
-    /** 正在运行的子 Agent 数量 */
+    /** 待完成的子 Agent 总数（含排队中 + 执行中） */
     public int runningCount() {
-        return runningTasks.size();
+        return pendingCount.get();
     }
 
     /** 关闭线程池 */
