@@ -204,11 +204,34 @@ AiMessage aiMsg = future.get();          // 阻塞等待，拿到含工具调用
 
 **摘要失败不丢数据（对标 Claude Code）：** LLM 摘要 API 报错时，不会把旧消息全替换成"摘要生成失败"。第 1-2 次失败降级为纯裁剪（扔前一半留后一半），第 3 次放弃压缩原样返回等 Token 预算熔断接手。**用户消息在微裁剪中永远不受影响。**
 
-**ContextBuilder.java** — 请求拼装 + Prompt Caching
+**ContextBuilder.java** — 请求拼装 + Prompt Caching（对标 Claude Code 6 层架构）
 
-每次 LLM 调用前组装完整 `ChatRequest`：`可缓存前缀（System Prompt + Memory + 工具声明）→ 对话历史`。前缀在构造时计算一次，后续每次 `build()` 复用同一个 `List<ChatMessage>` 引用。
+每次 LLM 调用前组装完整 `ChatRequest`。三层结构，对标 Claude Code 泄露的 `<|cache_boundary|>` 分隔：
 
-**缓存原理：** LLM API 比较相邻请求的公共前缀。前缀分离后，System Prompt、Memory 索引、工具声明在每次请求中完全相同——DeepSeek/Claude 自动识别并缓存，节省 30-50% token 成本。不需要显式 cache_control 标记，结构设计本身就自带缓存优化。
+```
+一次 API 请求 = messages + toolSpecifications
+
+messages:
+  ┌─ 缓存前缀（构造时固定，不复算）──────────────────┐
+  │  System Prompt（角色 + 规则 + TodoWrite 规范）  │ ← DeepSeek 自动前缀匹配缓存
+  └──────────────────────────────────────────────┘
+  ┌─ 动态层（每次 build() 刷新）───────────────────┐
+  │  工具名列表（ToolRegistry.describeNames()）     │ ← MCP 增删工具自动反映
+  │  Memory 索引（MemoryManager.getIndex()）        │ ← 新记忆不丢失
+  └──────────────────────────────────────────────┘
+  ┌─ 对话历史 ──────────────────────────────────┐
+  │  用户消息 + AI 回复 + 工具结果                │ ← 每轮追加
+
+toolSpecifications:
+  ┌─ 所有工具的 JSON Schema ────────────────────┐
+  │  [{bash schema}, {file schema}, {mcp schema}]│ ← DeepSeek 自动缓存（结构化参数）
+  └──────────────────────────────────────────────┘
+```
+
+**三点对齐 Claude Code：**
+1. **不变的东西进缓存前缀**：System Prompt 单独缓存，命中率接近 100%
+2. **会变的东西放动态层**：工具名列表 + Memory 每次从 ToolRegistry/MemoryManager 实时拿——MCP 中途增删工具、Agent 存新记忆立刻反映
+3. **Schema 不占文本空间**：走 `toolSpecifications` 参数，跟 messages 隔离，DeepSeek 单独缓存
 
 **SubagentRunner.java** — 四种专用子 Agent + 双层安全
 

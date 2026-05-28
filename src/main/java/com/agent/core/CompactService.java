@@ -238,9 +238,23 @@ public class CompactService {
      *
      * @param history 压缩前的完整对话历史
      */
+    /**
+     * 压缩前把对话转录到磁盘。
+     * 路径：~/.agent/transcripts/transcript_时间戳.txt
+     *
+     * <h3>失败不影响压缩</h3>
+     * 转录是调试工具（出事能回溯），不是压缩流程的依赖。
+     * 保存失败 → 记日志 → 压缩照常进行。宁可丢备份也不能阻塞 Agent 运行。
+     */
     private void saveTranscript(List<ChatMessage> history) {
         try {
-            Path dir = Paths.get(System.getProperty("user.home"), ".agent", "transcripts");
+            String home = System.getProperty("user.home");
+            if (home == null) home = System.getProperty("java.io.tmpdir");
+            if (home == null) {
+                log.warn("Cannot determine home or tmp dir, skipping transcript");
+                return;
+            }
+            Path dir = Paths.get(home, ".agent", "transcripts");
             Files.createDirectories(dir);
             String ts = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"));
             Path file = dir.resolve("transcript_" + ts + ".txt");
@@ -253,8 +267,9 @@ public class CompactService {
             }
             Files.writeString(file, sb.toString());
             log.info("Transcript saved to {}", file);
-        } catch (IOException e) {
-            log.warn("Failed to save transcript", e);
+        } catch (Exception e) {
+            // 磁盘满、没权限、路径不存在——都不影响压缩继续
+            log.warn("Failed to save transcript (compaction will proceed): {}", e.getMessage());
         }
     }
 }

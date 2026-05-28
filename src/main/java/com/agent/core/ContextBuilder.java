@@ -61,7 +61,7 @@ public class ContextBuilder {
     /**
      * 构建可缓存前缀 — 只在构造函数里调一次。
      *
-     * @return 包含 System Prompt + Memory + 工具声明 的三条消息
+     * @return 仅 System Prompt（工具名和 Memory 在 build() 里动态拼）
      */
     private List<ChatMessage> buildPrefix() {
         List<ChatMessage> prefix = new ArrayList<>();
@@ -92,40 +92,40 @@ public class ContextBuilder {
             "工作目录: " + config.getWorkspace()
         ));
 
-        // 槽位 2: Memory 索引
-        // 偶尔变（Agent 保存新记忆时），但大多数请求间不变
-        if (memoryManager != null) {
-            try {
-                String memoryIndex = memoryManager.getIndex();
-                if (memoryIndex != null && !memoryIndex.isEmpty()) {
-                    prefix.add(SystemMessage.from("记忆索引:\n" + memoryIndex));
-                }
-            } catch (Exception e) {
-                log.warn("Failed to load memory index", e);
-            }
-        }
-
-        // 槽位 3: 工具可用性声明
-        // 同一会话不变，帮助 LLM 知道手头有哪些武器
-        prefix.add(SystemMessage.from(
-            "可用工具: " + toolRegistry.describeNames()
-        ));
-
         return prefix;
     }
 
     /**
      * 组装完整 ChatRequest — AgentLoop 每轮调一次。
      *
-     * 过程：复用缓存的 System + Memory + 工具声明 前缀，
-     * 再拼接本次的对话历史（每轮增加），最后附上工具 JSON Schema。
+     * <h3>为什么 Tool 列表和 Memory 不放在缓存前缀里</h3>
+     * 两者都是会话中途会变的东西——
+     * MCP Server 中途增删工具、Agent 保存新记忆时，
+     * 放在动态部分每次重新读，保证 LLM 看到最新状态。
+     * Claude Code 也是把工具名列表和 Memory 放在动态 Append Prompt 层（cache_boundary 以下）。
      *
-     * @param history 当前完整对话历史（含着用户输入、AI 回复、工具结果）
+     * @param history 当前完整对话历史
      * @return 可以直接发给 API 的 ChatRequest
      */
     public ChatRequest build(List<ChatMessage> history) {
-        List<ChatMessage> messages = new ArrayList<>(cachedPrefix);  // 复用缓存
-        messages.addAll(history);  // 动态拼接
+        List<ChatMessage> messages = new ArrayList<>(cachedPrefix);  // 复用缓存前缀
+
+        // 动态工具列表：每次从 ToolRegistry 拿最新的（MCP 中途增删工具时自动反映）
+        messages.add(SystemMessage.from("可用工具: " + toolRegistry.describeNames()));
+
+        // 动态记忆：每次构建时重新读取（Agent 可能在会话中保存了新记忆）
+        if (memoryManager != null) {
+            try {
+                String memoryIndex = memoryManager.getIndex();
+                if (memoryIndex != null && !memoryIndex.isEmpty()) {
+                    messages.add(SystemMessage.from("当前记忆:\n" + memoryIndex));
+                }
+            } catch (Exception e) {
+                log.warn("Failed to load memory index", e);
+            }
+        }
+
+        messages.addAll(history);  // 动态拼接对话历史
 
         return ChatRequest.builder()
             .messages(messages)

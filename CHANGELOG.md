@@ -1,5 +1,16 @@
 # Changelog
 
+## v1.5.1 — Prompt Caching 对齐 Claude Code (2026-05-28)
+
+### 重构
+- **缓存前缀精简** — ContextBuilder 对齐 Claude Code `<|cache_boundary|>` 分隔。缓存前缀只放 System Prompt（永不改变），工具名列表和 Memory 索引移到动态层每次实时获取
+- **MCP 工具热感知** — 工具名列表从 `buildPrefix()` 移到 `build()`，`ToolRegistry.describeNames()` 每次重新调用——MCP Server 中途增删工具立刻反映到 LLM
+
+### 文档
+- **README** — ContextBuilder 模块说明新增 prompt 结构图 + 三点架构对齐说明
+
+---
+
 ## v1.5.0 — Token 预算制 + 熔断容错 (2026-05-26)
 
 ### 变更
